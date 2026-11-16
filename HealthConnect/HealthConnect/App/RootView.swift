@@ -23,6 +23,12 @@ struct RootView: View {
                 .tabItem {
                     Label("历史", systemImage: "clock")
                 }
+                NavigationStack {
+                    SettingsView(model: model)
+                }
+                .tabItem {
+                    Label("设置", systemImage: "gearshape")
+                }
             }
         }
     }

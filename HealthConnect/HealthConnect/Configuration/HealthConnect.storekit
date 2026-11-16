@@ -1,0 +1,129 @@
+{
+  "identifier" : "8C4E1A6B",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : false,
+      "internalID" : "TIP099",
+      "localizations" : [
+        {
+          "description" : "A one-time tip. It does not unlock features.",
+          "displayName" : "Tip 0.99",
+          "locale" : "en_US"
+        },
+        {
+          "description" : "一次性打赏，不会解锁功能。",
+          "displayName" : "打赏 0.99",
+          "locale" : "zh_Hans"
+        }
+      ],
+      "productID" : "com.bestony.HealthConnect.tip.099",
+      "referenceName" : "Tip 0.99",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "1.99",
+      "familyShareable" : false,
+      "internalID" : "TIP199",
+      "localizations" : [
+        {
+          "description" : "A one-time tip. It does not unlock features.",
+          "displayName" : "Tip 1.99",
+          "locale" : "en_US"
+        },
+        {
+          "description" : "一次性打赏，不会解锁功能。",
+          "displayName" : "打赏 1.99",
+          "locale" : "zh_Hans"
+        }
+      ],
+      "productID" : "com.bestony.HealthConnect.tip.199",
+      "referenceName" : "Tip 1.99",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "TIP499",
+      "localizations" : [
+        {
+          "description" : "A one-time tip. It does not unlock features.",
+          "displayName" : "Tip 4.99",
+          "locale" : "en_US"
+        },
+        {
+          "description" : "一次性打赏，不会解锁功能。",
+          "displayName" : "打赏 4.99",
+          "locale" : "zh_Hans"
+        }
+      ],
+      "productID" : "com.bestony.HealthConnect.tip.499",
+      "referenceName" : "Tip 4.99",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "HEALTHCONNECT",
+    "_developerTeamID" : "G78ET9SCSJ",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

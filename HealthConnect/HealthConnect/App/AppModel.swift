@@ -14,16 +14,18 @@ final class AppModel {
 
     let session: UploadSession
     let sync: SyncCoordinator?
+    let tips: TipStore
     var route: AppRoute
     var draftAddress: String
     var draftCode: String
     var setupMessage: String?
     var isSaving = false
 
-    init(settings: SettingsStoring, session: UploadSession, sync: SyncCoordinator? = nil) {
+    init(settings: SettingsStoring, session: UploadSession, sync: SyncCoordinator? = nil, tips: TipStore) {
         self.settings = settings
         self.session = session
         self.sync = sync
+        self.tips = tips
         if let saved = settings.load() {
             draftAddress = saved.url.absoluteString
             draftCode = saved.verificationCode
@@ -93,10 +95,12 @@ final class AppModel {
             },
             makeUploader: { ExportUploader(transport: URLSessionExportTransport()) }
         )
+        let observeTips = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
         return AppModel(
             settings: settings,
             session: session,
-            sync: SyncCoordinator(session: session, sampleTypes: HealthTypeCatalog.sampleTypes)
+            sync: SyncCoordinator(session: session, sampleTypes: HealthTypeCatalog.sampleTypes),
+            tips: TipStore(source: StoreKitTipSource(), observeTransactions: observeTips)
         )
     }
 
