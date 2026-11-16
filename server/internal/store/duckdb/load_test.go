@@ -31,7 +31,7 @@ func TestWorkoutsQuery(t *testing.T) {
 	}
 	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
-	rows, err := db.Workouts(ctx, userID, from, to, 10, nil, "")
+	rows, err := db.Workouts(ctx, userID, from, to, 10, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

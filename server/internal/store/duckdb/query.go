@@ -269,7 +269,8 @@ func (db *DB) Records(ctx context.Context, userID, typeName, tableName string, f
 }
 
 // Workouts pages workouts and loads their events and statistics.
-func (db *DB) Workouts(ctx context.Context, userID string, from, to time.Time, limit int, cursorStart *time.Time, cursorID string) ([]WorkoutRow, error) {
+// An empty activityType selects every activity type.
+func (db *DB) Workouts(ctx context.Context, userID string, from, to time.Time, limit int, cursorStart *time.Time, cursorID, activityType string) ([]WorkoutRow, error) {
 	hasCursor := 0
 	var cursor time.Time
 	if cursorStart != nil {
@@ -284,9 +285,10 @@ func (db *DB) Workouts(ctx context.Context, userID string, from, to time.Time, l
 		       source_name, start_utc, end_utc, tz_offset_min, metadata
 		FROM workouts
 		WHERE user_id = CAST(? AS UUID) AND start_utc >= ? AND start_utc < ?
+		  AND (? = '' OR activity_type = ?)
 		  AND (? = 0 OR start_utc > ? OR (start_utc = ? AND id > CAST(? AS UUID)))
 		ORDER BY start_utc, id
-		LIMIT ?`, userID, from.UTC(), to.UTC(), hasCursor, cursor, cursor, cursorID, limit)
+		LIMIT ?`, userID, from.UTC(), to.UTC(), activityType, activityType, hasCursor, cursor, cursor, cursorID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("duckdb workouts: %w", err)
 	}
@@ -402,6 +404,182 @@ func (db *DB) ActivitySummaries(ctx context.Context, userID string, from, to tim
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+// Overview counts workouts, activity days, and clinical records for one user.
+type Overview struct {
+	Workouts      int64
+	ActivityDays  int64
+	HealthRecords int64
+}
+
+// Overview returns counts that are not part of the sample catalog.
+func (db *DB) Overview(ctx context.Context, userID string) (Overview, error) {
+	var out Overview
+	err := db.sql.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM workouts WHERE user_id = CAST(? AS UUID)),
+			(SELECT COUNT(*) FROM activity_summaries WHERE user_id = CAST(? AS UUID)),
+			(SELECT COUNT(*) FROM health_records WHERE user_id = CAST(? AS UUID))`,
+		userID, userID, userID).Scan(&out.Workouts, &out.ActivityDays, &out.HealthRecords)
+	if err != nil {
+		return Overview{}, fmt.Errorf("duckdb overview: %w", err)
+	}
+	return out, nil
+}
+
+// QuantityStat is one unit's aggregate over a half-open window.
+type QuantityStat struct {
+	Unit  string
+	Count int64
+	Min   float64
+	Max   float64
+	Avg   float64
+	Sum   float64
+	Days  int64
+}
+
+// QuantityStats aggregates one numeric type in [from, to).
+func (db *DB) QuantityStats(ctx context.Context, userID, typeName string, from, to time.Time) ([]QuantityStat, error) {
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT unit, COUNT(*), MIN(value), MAX(value), AVG(value), SUM(value),
+		       COUNT(DISTINCT date_trunc('day', start_utc + tz_offset_min * INTERVAL 1 MINUTE))
+		FROM quantity_samples
+		WHERE user_id = CAST(? AS UUID) AND type = ? AND start_utc >= ? AND start_utc < ?
+		GROUP BY unit
+		ORDER BY unit`, userID, typeName, from.UTC(), to.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("duckdb quantity stats: %w", err)
+	}
+	defer rows.Close()
+	var out []QuantityStat
+	for rows.Next() {
+		var stat QuantityStat
+		if err := rows.Scan(&stat.Unit, &stat.Count, &stat.Min, &stat.Max, &stat.Avg, &stat.Sum, &stat.Days); err != nil {
+			return nil, fmt.Errorf("duckdb quantity stats scan: %w", err)
+		}
+		out = append(out, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("duckdb quantity stats: %w", err)
+	}
+	return out, nil
+}
+
+// CategoryCount is one category value and its count.
+type CategoryCount struct {
+	Value string
+	Count int64
+}
+
+// CategoryCounts returns the most common values for one category type.
+func (db *DB) CategoryCounts(ctx context.Context, userID, typeName string, from, to time.Time, limit int) ([]CategoryCount, error) {
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT value_text, COUNT(*)
+		FROM category_samples
+		WHERE user_id = CAST(? AS UUID) AND type = ? AND start_utc >= ? AND start_utc < ?
+		GROUP BY value_text
+		ORDER BY COUNT(*) DESC, value_text
+		LIMIT ?`, userID, typeName, from.UTC(), to.UTC(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("duckdb category counts: %w", err)
+	}
+	defer rows.Close()
+	var out []CategoryCount
+	for rows.Next() {
+		var item CategoryCount
+		if err := rows.Scan(&item.Value, &item.Count); err != nil {
+			return nil, fmt.Errorf("duckdb category counts scan: %w", err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("duckdb category counts: %w", err)
+	}
+	return out, nil
+}
+
+// LocalDays returns distinct local civil days that have a numeric sample.
+func (db *DB) LocalDays(ctx context.Context, userID, typeName string, from, to time.Time) ([]time.Time, error) {
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT DISTINCT date_trunc('day', start_utc + tz_offset_min * INTERVAL 1 MINUTE)
+		FROM quantity_samples
+		WHERE user_id = CAST(? AS UUID) AND type = ? AND start_utc >= ? AND start_utc < ?
+		ORDER BY 1`, userID, typeName, from.UTC(), to.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("duckdb local days: %w", err)
+	}
+	defer rows.Close()
+	var out []time.Time
+	for rows.Next() {
+		var day time.Time
+		if err := rows.Scan(&day); err != nil {
+			return nil, fmt.Errorf("duckdb local days scan: %w", err)
+		}
+		out = append(out, day)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("duckdb local days: %w", err)
+	}
+	return out, nil
+}
+
+// HealthRecordRow is one stored clinical record.
+type HealthRecordRow struct {
+	Kind           string
+	TypeIdentifier string
+	Start          *time.Time
+	End            *time.Time
+	TZOffsetMin    *int
+	Source         string
+	Device         string
+	Payload        json.RawMessage
+}
+
+// HealthRecords lists clinical records in [from, to). An empty typeIdentifier selects every type.
+// Records with no start time are omitted.
+func (db *DB) HealthRecords(ctx context.Context, userID, typeIdentifier string, from, to time.Time, limit int) ([]HealthRecordRow, error) {
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT kind, type_identifier, start_utc, end_utc, tz_offset_min, source_name, device, payload
+		FROM health_records
+		WHERE user_id = CAST(? AS UUID)
+		  AND (? = '' OR type_identifier = ?)
+		  AND start_utc >= ? AND start_utc < ?
+		ORDER BY start_utc, type_identifier
+		LIMIT ?`, userID, typeIdentifier, typeIdentifier, from.UTC(), to.UTC(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("duckdb health records: %w", err)
+	}
+	defer rows.Close()
+	var out []HealthRecordRow
+	for rows.Next() {
+		var row HealthRecordRow
+		var start, end sql.NullTime
+		var offset sql.NullInt64
+		var source, device sql.NullString
+		var payload any
+		if err := rows.Scan(&row.Kind, &row.TypeIdentifier, &start, &end, &offset, &source, &device, &payload); err != nil {
+			return nil, fmt.Errorf("duckdb health records scan: %w", err)
+		}
+		if start.Valid {
+			row.Start = &start.Time
+		}
+		if end.Valid {
+			row.End = &end.Time
+		}
+		if offset.Valid {
+			n := int(offset.Int64)
+			row.TZOffsetMin = &n
+		}
+		row.Source = source.String
+		row.Device = device.String
+		row.Payload = rawJSON(payload)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("duckdb health records: %w", err)
+	}
+	return out, nil
 }
 
 // DeleteUser removes one user's facts.

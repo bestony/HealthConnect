@@ -213,6 +213,38 @@ func (db *DB) BootstrapToken(ctx context.Context, tokenPath string) (created boo
 	return true, nil
 }
 
+// MintToken creates a user and a bearer token. The raw token is returned once.
+func (db *DB) MintToken(ctx context.Context, displayName string) (userID, token string, err error) {
+	if strings.TrimSpace(displayName) == "" {
+		displayName = "owner"
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", "", fmt.Errorf("sqlite token rand: %w", err)
+	}
+	token = "hc_" + hex.EncodeToString(raw)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	userID = newID()
+	tokenID := newID()
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("sqlite begin mint: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, display_name, created_at) VALUES (?, ?, ?)`, userID, displayName, now); err != nil {
+		_ = tx.Rollback()
+		return "", "", fmt.Errorf("sqlite insert user: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO api_tokens(id, user_id, token_hash, created_at) VALUES (?, ?, ?, ?)`, tokenID, userID, hashToken(token), now); err != nil {
+		_ = tx.Rollback()
+		return "", "", fmt.Errorf("sqlite insert token: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", "", fmt.Errorf("sqlite commit mint: %w", err)
+	}
+	db.log.Info("sqlite token minted", "user_id", userID)
+	return userID, token, nil
+}
+
 // UserIDByToken returns the user id for a raw bearer token.
 func (db *DB) UserIDByToken(ctx context.Context, token string) (string, error) {
 	var userID string

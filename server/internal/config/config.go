@@ -24,6 +24,7 @@ type Config struct {
 	MaxUploadBytes       int64
 	MaxUncompressedBytes int64
 	LogLevel             slog.Level
+	MCPEnabled           bool
 }
 
 // FromEnv reads configuration from the process environment.
@@ -51,6 +52,7 @@ func Parse(env map[string]string) (Config, error) {
 		MaxUploadBytes:       defaultMaxUploadBytes,
 		MaxUncompressedBytes: defaultMaxUncompressedBytes,
 		LogLevel:             slog.LevelInfo,
+		MCPEnabled:           true,
 	}
 	var err error
 	if raw := strings.TrimSpace(env["MAX_UPLOAD_BYTES"]); raw != "" {
@@ -70,6 +72,10 @@ func Parse(env map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	cfg.MCPEnabled, err = parseBool(env["MCP_ENABLED"], true)
+	if err != nil {
+		return Config{}, err
+	}
 	if strings.TrimSpace(cfg.HTTPAddr) == "" {
 		return Config{}, fmt.Errorf("HTTP_ADDR: empty")
 	}
@@ -85,6 +91,19 @@ func valueOr(env map[string]string, key, fallback string) string {
 		return fallback
 	}
 	return raw
+}
+
+func parseBool(raw string, fallback bool) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return fallback, nil
+	case "1", "true":
+		return true, nil
+	case "0", "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("MCP_ENABLED: want true or false")
+	}
 }
 
 func parseLevel(raw string) (slog.Level, error) {

@@ -185,7 +185,7 @@ func (h Query) Workouts(c *gin.Context) {
 		cursorAt = &at
 		cursorID = string(key)
 	}
-	rows, err := h.Facts.Workouts(c.Request.Context(), userID, from, to, limit, cursorAt, cursorID)
+	rows, err := h.Facts.Workouts(c.Request.Context(), userID, from, to, limit, cursorAt, cursorID, "")
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "internal")
 		return

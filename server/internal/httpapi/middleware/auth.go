@@ -23,7 +23,7 @@ func RequireAuth(lookup TokenLookup, notFound error, log *slog.Logger) gin.Handl
 		log = slog.Default()
 	}
 	return func(c *gin.Context) {
-		token, ok := bearerToken(c.GetHeader("Authorization"))
+		token, ok := BearerToken(c.GetHeader("Authorization"))
 		if !ok {
 			log.Debug("auth rejected", "reason", "missing_bearer")
 			c.AbortWithStatusJSON(401, gin.H{"error": "unauthorized"})
@@ -57,7 +57,8 @@ func UserID(c *gin.Context) (string, bool) {
 
 const userKey = "user_id"
 
-func bearerToken(header string) (string, bool) {
+// BearerToken returns the credential from an Authorization header.
+func BearerToken(header string) (string, bool) {
 	scheme, token, ok := strings.Cut(header, " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		return "", false

@@ -22,6 +22,9 @@ func TestParseDefaults(t *testing.T) {
 	if cfg.LogLevel.String() != "INFO" {
 		t.Fatalf("LogLevel = %s", cfg.LogLevel)
 	}
+	if !cfg.MCPEnabled {
+		t.Fatal("MCPEnabled = false")
+	}
 }
 
 func TestParseOverrides(t *testing.T) {
@@ -31,6 +34,7 @@ func TestParseOverrides(t *testing.T) {
 		"MAX_UPLOAD_BYTES":       "1024",
 		"MAX_UNCOMPRESSED_BYTES": "2048",
 		"LOG_LEVEL":              "debug",
+		"MCP_ENABLED":            "false",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +47,20 @@ func TestParseOverrides(t *testing.T) {
 	}
 	if cfg.LogLevel.String() != "DEBUG" {
 		t.Fatalf("level = %s", cfg.LogLevel)
+	}
+	if cfg.MCPEnabled {
+		t.Fatal("MCPEnabled = true")
+	}
+}
+
+func TestParseMCPEnabled(t *testing.T) {
+	on, err := Parse(map[string]string{"MCP_ENABLED": "true"})
+	if err != nil || !on.MCPEnabled {
+		t.Fatalf("on = %+v %v", on.MCPEnabled, err)
+	}
+	_, err = Parse(map[string]string{"MCP_ENABLED": "maybe"})
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }
 

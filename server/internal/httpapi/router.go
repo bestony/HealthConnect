@@ -10,6 +10,7 @@ import (
 	"com.bestony.health-connect/internal/httpapi/handlers"
 	"com.bestony.health-connect/internal/httpapi/middleware"
 	"com.bestony.health-connect/internal/ingest"
+	"com.bestony.health-connect/internal/mcpapi"
 	"com.bestony.health-connect/internal/store/duckdb"
 	"com.bestony.health-connect/internal/store/sqlite"
 
@@ -18,14 +19,15 @@ import (
 
 // Deps holds the collaborators the router needs.
 type Deps struct {
-	Log       *slog.Logger
-	Tokens    middleware.TokenLookup
-	NotFound  error
-	Imports   *ingest.Service
-	Exports   *export.Service
-	Facts     *duckdb.DB
-	Meta      *sqlite.DB
-	MaxUpload int64
+	Log        *slog.Logger
+	Tokens     middleware.TokenLookup
+	NotFound   error
+	Imports    *ingest.Service
+	Exports    *export.Service
+	Facts      *duckdb.DB
+	Meta       *sqlite.DB
+	MaxUpload  int64
+	MCPEnabled bool
 }
 
 // New builds the HTTP handler.
@@ -39,6 +41,13 @@ func New(deps Deps) http.Handler {
 	r.MaxMultipartMemory = 8 << 20
 	r.Use(accessLog(log), recovery(log))
 	r.GET("/v1/healthz", handlers.Health)
+	if deps.MCPEnabled && deps.Facts != nil && deps.Meta != nil && deps.Tokens != nil {
+		mcpHandler := mcpapi.Handler(mcpapi.Deps{
+			Log: log, Tokens: deps.Tokens, NotFound: deps.NotFound, Facts: deps.Facts, Meta: deps.Meta,
+		})
+		r.Any("/mcp", gin.WrapH(mcpHandler))
+		log.Info("mcp enabled", "path", "/mcp")
+	}
 	if deps.Imports != nil {
 		api := handlers.Imports{Svc: deps.Imports, MaxUpload: deps.MaxUpload}
 		auth := middleware.RequireAuth(deps.Tokens, deps.NotFound, log)

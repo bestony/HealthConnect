@@ -78,4 +78,36 @@ func TestOpenMigrateAndBootstrap(t *testing.T) {
 	if tables != 5 {
 		t.Fatalf("tables = %d", tables)
 	}
+
+	otherID, otherToken, err := db.MintToken(ctx, "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherID == userID {
+		t.Fatal("mint reused the bootstrap user")
+	}
+	got, err := db.UserIDByToken(ctx, otherToken)
+	if err != nil || got != otherID {
+		t.Fatalf("mint lookup = %q %v", got, err)
+	}
+	if err := db.ReplaceCharacteristics(ctx, otherID, "import", map[string]string{
+		"HKCharacteristicTypeIdentifierBiologicalSex": "HKBiologicalSexFemale",
+		"HKCharacteristicTypeIdentifierDateOfBirth":   "2001-02-03",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := db.ListCharacteristics(ctx, otherID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].Key != "HKCharacteristicTypeIdentifierBiologicalSex" || items[1].Value != "2001-02-03" {
+		t.Fatalf("characteristics = %+v", items)
+	}
+	ownerItems, err := db.ListCharacteristics(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ownerItems) != 0 {
+		t.Fatalf("owner characteristics = %+v", ownerItems)
+	}
 }

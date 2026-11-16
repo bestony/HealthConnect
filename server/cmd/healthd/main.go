@@ -83,6 +83,7 @@ func run() error {
 		Handler: httpapi.New(httpapi.Deps{
 			Log: log, Tokens: meta, NotFound: sqlite.ErrNotFound,
 			Imports: service, Exports: exports, Facts: facts, Meta: meta, MaxUpload: cfg.MaxUploadBytes,
+			MCPEnabled: cfg.MCPEnabled,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
