@@ -8,15 +8,18 @@ import (
 
 	"com.bestony.health-connect/internal/httpapi/handlers"
 	"com.bestony.health-connect/internal/httpapi/middleware"
+	"com.bestony.health-connect/internal/ingest"
 
 	"github.com/gin-gonic/gin"
 )
 
 // Deps holds the collaborators the router needs.
 type Deps struct {
-	Log      *slog.Logger
-	Tokens   middleware.TokenLookup
-	NotFound error
+	Log       *slog.Logger
+	Tokens    middleware.TokenLookup
+	NotFound  error
+	Imports   *ingest.Service
+	MaxUpload int64
 }
 
 // New builds the HTTP handler.
@@ -29,8 +32,15 @@ func New(deps Deps) http.Handler {
 	r.MaxMultipartMemory = 8 << 20
 	r.Use(accessLog(log), recovery(log))
 	r.GET("/v1/healthz", handlers.Health)
-	_ = deps.Tokens
-	_ = deps.NotFound
+	if deps.Imports != nil {
+		api := handlers.Imports{Svc: deps.Imports, MaxUpload: deps.MaxUpload}
+		auth := middleware.RequireAuth(deps.Tokens, deps.NotFound, log)
+		v1 := r.Group("/v1", auth)
+		v1.POST("/imports", api.Create)
+		v1.GET("/imports", api.List)
+		v1.GET("/imports/:id", api.Get)
+		v1.POST("/imports/:id/retry", api.Retry)
+	}
 	return r
 }
 

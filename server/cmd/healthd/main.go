@@ -15,6 +15,8 @@ import (
 
 	"com.bestony.health-connect/internal/config"
 	"com.bestony.health-connect/internal/httpapi"
+	"com.bestony.health-connect/internal/ingest"
+	"com.bestony.health-connect/internal/store/duckdb"
 	"com.bestony.health-connect/internal/store/sqlite"
 )
 
@@ -53,10 +55,33 @@ func run() error {
 	if created {
 		log.Info("bootstrap token created", "path", tokenPath)
 	}
+	if err := meta.InterruptActive(ctx); err != nil {
+		return err
+	}
+
+	facts, err := duckdb.Open(ctx, filepath.Join(cfg.DataDir, "health.duckdb"), log)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = facts.Close() }()
+	if err := facts.ClearStaging(ctx); err != nil {
+		return err
+	}
+
+	inbox := filepath.Join(cfg.DataDir, "inbox")
+	worker := ingest.NewWorker(meta, facts, inbox, ingest.Limits{
+		MaxEntries: 10000,
+		MaxBytes:   cfg.MaxUncompressedBytes,
+	}, log)
+	worker.Start(ctx)
+	service := ingest.NewService(meta, worker, inbox, log)
 
 	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.New(httpapi.Deps{Log: log, Tokens: meta, NotFound: sqlite.ErrNotFound}),
+		Addr: cfg.HTTPAddr,
+		Handler: httpapi.New(httpapi.Deps{
+			Log: log, Tokens: meta, NotFound: sqlite.ErrNotFound,
+			Imports: service, MaxUpload: cfg.MaxUploadBytes,
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
