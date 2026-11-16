@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"com.bestony.health-connect/internal/config"
+	"com.bestony.health-connect/internal/export"
 	"com.bestony.health-connect/internal/httpapi"
 	"com.bestony.health-connect/internal/ingest"
 	"com.bestony.health-connect/internal/store/duckdb"
@@ -75,12 +76,13 @@ func run() error {
 	}, log)
 	worker.Start(ctx)
 	service := ingest.NewService(meta, worker, inbox, log)
+	exports := export.NewService(meta, facts, cfg.DataDir, log)
 
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.New(httpapi.Deps{
 			Log: log, Tokens: meta, NotFound: sqlite.ErrNotFound,
-			Imports: service, Facts: facts, Meta: meta, MaxUpload: cfg.MaxUploadBytes,
+			Imports: service, Exports: exports, Facts: facts, Meta: meta, MaxUpload: cfg.MaxUploadBytes,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,

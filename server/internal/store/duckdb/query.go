@@ -420,6 +420,7 @@ func (db *DB) DeleteUser(ctx context.Context, userID string) error {
 		`DELETE FROM quantity_samples WHERE user_id = CAST(? AS UUID)`,
 		`DELETE FROM category_samples WHERE user_id = CAST(? AS UUID)`,
 		`DELETE FROM activity_summaries WHERE user_id = CAST(? AS UUID)`,
+		`DELETE FROM health_records WHERE user_id = CAST(? AS UUID)`,
 	}
 	for _, stmt := range statements {
 		if _, err := tx.ExecContext(ctx, stmt, userID); err != nil {

@@ -26,6 +26,7 @@ type Loader struct {
 	events      *duckdb.Appender
 	stats       *duckdb.Appender
 	activity    *duckdb.Appender
+	records     *duckdb.Appender
 	pending     int
 	all         []*duckdb.Appender
 }
@@ -41,6 +42,7 @@ func NewLoader(conn driver.Conn) (*Loader, error) {
 		"workout_events_staging",
 		"workout_statistics_staging",
 		"activity_summaries_staging",
+		"health_records_staging",
 	}
 	apps := make([]*duckdb.Appender, 0, len(names))
 	for _, name := range names {
@@ -55,7 +57,7 @@ func NewLoader(conn driver.Conn) (*Loader, error) {
 	}
 	return &Loader{
 		quantity: apps[0], category: apps[1], correlation: apps[2], members: apps[3],
-		workouts: apps[4], events: apps[5], stats: apps[6], activity: apps[7], all: apps,
+		workouts: apps[4], events: apps[5], stats: apps[6], activity: apps[7], records: apps[8], all: apps,
 	}, nil
 }
 
@@ -228,6 +230,43 @@ func (l *Loader) AppendActivity(userID, importID string, item domain.ActivitySum
 	return l.note()
 }
 
+// HealthRecord is one raw NDJSON record kept beside the typed fact tables.
+type HealthRecord struct {
+	Kind           string
+	TypeIdentifier string
+	UUID           string
+	Start          *time.Time
+	End            *time.Time
+	TZOffsetMin    *int
+	Source         string
+	Device         string
+	Payload        json.RawMessage
+}
+
+// AppendHealthRecord stages one raw record.
+func (l *Loader) AppendHealthRecord(userID, importID string, rec HealthRecord) error {
+	user, imp, err := ids(userID, importID)
+	if err != nil {
+		return err
+	}
+	var offset any
+	if rec.TZOffsetMin != nil {
+		offset = int16(*rec.TZOffsetMin)
+	}
+	payload := any(nil)
+	if len(rec.Payload) > 0 {
+		payload = json.RawMessage(rec.Payload)
+	}
+	if err := l.records.AppendRow(
+		user, imp, rec.Kind, rec.TypeIdentifier, emptyNil(rec.UUID),
+		timeOrNil(rec.Start), timeOrNil(rec.End), offset,
+		emptyNil(rec.Source), emptyNil(rec.Device), payload,
+	); err != nil {
+		return fmt.Errorf("duckdb append health record: %w", err)
+	}
+	return l.note()
+}
+
 // WithLoader runs fn while a driver connection is held, then releases it.
 func (db *DB) WithLoader(ctx context.Context, fn func(*Loader) error) error {
 	conn, err := db.sql.Conn(ctx)
@@ -265,6 +304,7 @@ func (db *DB) CommitImport(ctx context.Context, userID, importID, mode string) (
 			`DELETE FROM quantity_samples WHERE user_id = CAST(? AS UUID)`,
 			`DELETE FROM category_samples WHERE user_id = CAST(? AS UUID)`,
 			`DELETE FROM activity_summaries WHERE user_id = CAST(? AS UUID)`,
+			`DELETE FROM health_records WHERE user_id = CAST(? AS UUID)`,
 		}
 		for _, stmt := range statements {
 			if _, err := tx.ExecContext(ctx, stmt, userID); err != nil {
@@ -297,6 +337,7 @@ func (db *DB) CommitImport(ctx context.Context, userID, importID, mode string) (
 		`INSERT INTO activity_summaries SELECT * FROM activity_summaries_staging s
 		 WHERE s.import_id = CAST(? AS UUID) AND NOT EXISTS (
 		   SELECT 1 FROM activity_summaries a WHERE a.user_id = s.user_id AND a.day = s.day)`,
+		`INSERT INTO health_records SELECT * FROM health_records_staging WHERE import_id = CAST(? AS UUID)`,
 	}
 	for _, stmt := range inserts {
 		if _, err := tx.ExecContext(ctx, stmt, importID); err != nil {
@@ -363,6 +404,7 @@ var stagingTables = []string{
 	"workout_events_staging",
 	"workout_statistics_staging",
 	"activity_summaries_staging",
+	"health_records_staging",
 }
 
 func (db *DB) reorder(ctx context.Context) error {

@@ -72,10 +72,10 @@ func TestOpenMigrateAndBootstrap(t *testing.T) {
 	}
 
 	var tables int
-	if err := db.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE name IN ('users','api_tokens','imports','characteristics')`).Scan(&tables); err != nil {
+	if err := db.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE name IN ('users','api_tokens','imports','characteristics','exports')`).Scan(&tables); err != nil {
 		t.Fatal(err)
 	}
-	if tables != 4 {
+	if tables != 5 {
 		t.Fatalf("tables = %d", tables)
 	}
 }

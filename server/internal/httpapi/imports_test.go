@@ -14,10 +14,20 @@ import (
 	"testing"
 	"time"
 
+	"com.bestony.health-connect/internal/export"
 	"com.bestony.health-connect/internal/ingest"
 	"com.bestony.health-connect/internal/store/duckdb"
 	"com.bestony.health-connect/internal/store/sqlite"
 )
+
+type apiStack struct {
+	handler http.Handler
+	token   string
+	facts   *duckdb.DB
+	meta    *sqlite.DB
+	exports *export.Service
+	dir     string
+}
 
 func TestImportExportAndRejects(t *testing.T) {
 	h, token, facts, meta := newAPI(t, true)
@@ -98,6 +108,12 @@ func TestActiveImportConflict(t *testing.T) {
 
 func newAPI(t *testing.T, startWorker bool) (http.Handler, string, *duckdb.DB, *sqlite.DB) {
 	t.Helper()
+	stack := newStack(t, startWorker)
+	return stack.handler, stack.token, stack.facts, stack.meta
+}
+
+func newStack(t *testing.T, startWorker bool) apiStack {
+	t.Helper()
 	dir := t.TempDir()
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -127,11 +143,12 @@ func newAPI(t *testing.T, startWorker bool) (http.Handler, string, *duckdb.DB, *
 		worker.Start(ctx)
 	}
 	svc := ingest.NewService(meta, worker, inbox, log)
+	exports := export.NewService(meta, facts, dir, log)
 	handler := New(Deps{
 		Log: log, Tokens: meta, NotFound: sqlite.ErrNotFound,
-		Imports: svc, Facts: facts, Meta: meta, MaxUpload: 1 << 20,
+		Imports: svc, Exports: exports, Facts: facts, Meta: meta, MaxUpload: 1 << 20,
 	})
-	return handler, token, facts, meta
+	return apiStack{handler: handler, token: token, facts: facts, meta: meta, exports: exports, dir: dir}
 }
 
 func postImport(t *testing.T, h http.Handler, token, mode, key, filename string, body []byte) *httptest.ResponseRecorder {

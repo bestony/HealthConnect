@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"com.bestony.health-connect/internal/export"
 	"com.bestony.health-connect/internal/httpapi/handlers"
 	"com.bestony.health-connect/internal/httpapi/middleware"
 	"com.bestony.health-connect/internal/ingest"
@@ -21,6 +22,7 @@ type Deps struct {
 	Tokens    middleware.TokenLookup
 	NotFound  error
 	Imports   *ingest.Service
+	Exports   *export.Service
 	Facts     *duckdb.DB
 	Meta      *sqlite.DB
 	MaxUpload int64
@@ -45,6 +47,12 @@ func New(deps Deps) http.Handler {
 		v1.GET("/imports", api.List)
 		v1.GET("/imports/:id", api.Get)
 		v1.POST("/imports/:id/retry", api.Retry)
+		if deps.Exports != nil {
+			exp := handlers.Exports{Svc: deps.Exports}
+			v1.POST("/exports", exp.Create)
+			v1.POST("/exports/:id/batches", exp.Batch)
+			v1.POST("/exports/:id/complete", exp.Complete)
+		}
 		if deps.Facts != nil && deps.Meta != nil {
 			query := handlers.Query{Facts: deps.Facts, Meta: deps.Meta}
 			v1.GET("/catalog", query.Catalog)

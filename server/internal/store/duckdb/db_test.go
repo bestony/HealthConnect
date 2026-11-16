@@ -22,12 +22,12 @@ func TestOpenIsIdempotent(t *testing.T) {
 		WHERE table_schema = 'main' AND table_name IN (
 			'quantity_samples', 'category_samples', 'correlations', 'correlation_members',
 			'workouts', 'workout_events', 'workout_statistics', 'activity_summaries',
-			'quantity_samples_staging'
+			'quantity_samples_staging', 'health_records', 'health_records_staging'
 		)`).Scan(&tables)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tables != 9 {
+	if tables != 11 {
 		t.Fatalf("tables = %d", tables)
 	}
 	if err := db.Close(); err != nil {
