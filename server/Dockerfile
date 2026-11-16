@@ -12,11 +12,11 @@ RUN apt-get update \
 
 WORKDIR /src
 
-COPY go.mod go.sum ./
+COPY server/go.mod server/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
-COPY . .
+COPY server/ .
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -38,8 +38,8 @@ RUN apt-get update \
     && chown healthd:healthd /var/lib/healthconnect
 
 COPY --from=build --chmod=755 /out/healthd /usr/local/bin/healthd
+COPY --chmod=755 server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-USER healthd:healthd
 WORKDIR /var/lib/healthconnect
 
 ENV HTTP_ADDR=0.0.0.0:8080 \
@@ -53,4 +53,4 @@ VOLUME ["/var/lib/healthconnect"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["curl", "-fsS", "http://127.0.0.1:8080/v1/healthz"]
 
-ENTRYPOINT ["/usr/local/bin/healthd"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

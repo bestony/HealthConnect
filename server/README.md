@@ -37,68 +37,73 @@ The default listen address is `127.0.0.1:8080`. If you change `HTTP_ADDR`, the t
 
 ## Deploy
 
-The container image listens on `0.0.0.0:8080`.
-The Compose file does not publish that port.
-Caddy obtains a certificate for `DOMAIN` and forwards traffic to `healthd`.
-
+The container listens on `0.0.0.0:8080` and serves HTTP.
+Terminate TLS in the platform in front of the container.
 The iOS app accepts `https` for a public host.
-Set the app server address to `https://<DOMAIN>`.
-The MCP address is `https://<DOMAIN>/mcp`.
+Set the app server address to `https://<public host>`.
+The MCP address is `https://<public host>/mcp`.
 
 DuckDB accepts one writer process.
-Run one `healthd` container for the data volume.
+Run one container for the data directory.
 
 Build the image on the target machine architecture.
 DuckDB provides static libraries for `linux/amd64` and `linux/arm64`.
 The link step needs several gigabytes of memory.
 
-### Requirements
+The process starts as root.
+It gives `/var/lib/healthconnect` to the user `healthd`, and then it drops privileges.
 
-- Docker Engine 24 or newer, with the Compose plugin.
-- A DNS name that points at this host.
-- Open TCP ports 80 and 443, and UDP port 443.
-- Free disk space for the health data. A full export can use many gigabytes.
+### CapRover
 
-### Start
+The repository root contains `captain-definition`.
+CapRover builds `server/Dockerfile`. The build context is the repository root.
 
-Copy the environment file:
+1. Create an app.
+2. Set the Container HTTP Port to `8080`.
+3. Add a persistent directory. The container path is `/var/lib/healthconnect`.
+4. Set the instance count to `1`.
+5. Enable HTTPS for the app domain.
+6. Enable WebSocket support so a long MCP stream stays open.
+7. Deploy this repository.
 
-```sh
-cd server
-cp .env.example .env
-```
-
-Set `DOMAIN` and `ACME_EMAIL` in `.env`.
-Do not commit `.env`.
-
-Start the stack:
+Read the bootstrap token on the CapRover host.
+Replace `APP` with the app name.
 
 ```sh
-docker compose up -d --build
-```
-
-Read the bootstrap token:
-
-```sh
-docker compose exec healthd cat /var/lib/healthconnect/bootstrap.token
+docker exec "$(docker ps -q -f name=srv-captain--APP)" cat /var/lib/healthconnect/bootstrap.token
 ```
 
 Use this token as the verification code in the iOS app.
 Use the same token as the bearer token for `/mcp`.
 The file mode is `0600`. The logs do not contain the token.
 
+The iOS app sends batch bodies of at most 8 MB.
+Raise the CapRover upload limit when a request body is larger than that limit.
+
+### Compose
+
+Use Compose on a host whose proxy already terminates TLS.
+The Compose file publishes port `8080`.
+
+```sh
+cd server
+docker compose up -d --build
+docker compose exec -u root healthd cat /var/lib/healthconnect/bootstrap.token
+```
+
+Copy `server/.env.example` to `server/.env` when you want to change a setting.
+Do not commit `.env`.
+
 ### Configuration
 
-| Variable | Compose value | Meaning |
+| Variable | Default | Meaning |
 | --- | --- | --- |
 | `HTTP_ADDR` | `0.0.0.0:8080` | Listen address inside the container. Keep this value. |
-| `DATA_DIR` | `/var/lib/healthconnect` | Data directory. The named volume `healthconnect-data` uses this path. |
+| `DATA_DIR` | `/var/lib/healthconnect` | Data directory. Persist this path. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 | `MCP_ENABLED` | `true` | `false` disables `/mcp`. |
 | `MAX_UPLOAD_BYTES` | `8589934592` | Maximum HTTP body size. The default is 8 GiB. |
 | `MAX_UNCOMPRESSED_BYTES` | `17179869184` | Maximum uncompressed import size. The default is 16 GiB. |
-| `DOMAIN` | none | Public DNS name for Caddy. |
-| `ACME_EMAIL` | none | Email address for certificate notices. |
 
 ### Backup
 
@@ -120,10 +125,10 @@ The archive contains the bootstrap token and the health data.
 
 ### Local image check
 
-This check does not obtain a certificate.
+Run these commands from the repository root:
 
 ```sh
-docker build -t healthconnect-healthd:local .
+docker build -f server/Dockerfile -t healthconnect-healthd:local .
 docker run --rm -p 127.0.0.1:8080:8080 healthconnect-healthd:local
 ```
 
