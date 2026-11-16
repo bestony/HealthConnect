@@ -1,4 +1,5 @@
 .gitlock
 server/data/
+server/.env
 .DS_Store
 HealthConnect/HealthConnectTests/LiveSecret.txt

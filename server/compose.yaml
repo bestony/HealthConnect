@@ -1,0 +1,88 @@
+# Production stack for healthd.
+# Run one healthd container on one data volume. DuckDB accepts one writer.
+# The iOS app accepts https for a public host. Caddy serves that https endpoint.
+
+name: healthconnect
+
+services:
+  healthd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: healthconnect-healthd:local
+    restart: unless-stopped
+    stop_grace_period: 20s
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HTTP_ADDR: 0.0.0.0:8080
+      DATA_DIR: /var/lib/healthconnect
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MCP_ENABLED: ${MCP_ENABLED:-true}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-8589934592}
+      MAX_UNCOMPRESSED_BYTES: ${MAX_UNCOMPRESSED_BYTES:-17179869184}
+    volumes:
+      - health-data:/var/lib/healthconnect
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/v1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - app
+
+  caddy:
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    depends_on:
+      healthd:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in server/.env. Use a DNS name that points at this host.}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in server/.env.}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - app
+
+networks:
+  app:
+
+volumes:
+  health-data:
+    name: healthconnect-data
+  caddy-data:
+    name: healthconnect-caddy-data
+  caddy-config:
+    name: healthconnect-caddy-config

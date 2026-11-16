@@ -1,0 +1,15 @@
+data
+**/*.sqlite
+**/*.sqlite-wal
+**/*.sqlite-shm
+**/*.duckdb
+**/*.duckdb.wal
+**/bootstrap.token
+testdata
+**/*_test.go
+.env
+*.md
+compose.yaml
+Caddyfile
+.dockerignore
+Dockerfile
