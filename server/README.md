@@ -53,10 +53,47 @@ The link step needs several gigabytes of memory.
 The process starts as root.
 It gives `/var/lib/healthconnect` to the user `healthd`, and then it drops privileges.
 
+### Published image
+
+GitHub Actions builds this image and pushes it to GHCR.
+The workflow file is `.github/workflows/healthd-image.yml`.
+
+The workflow runs on these events:
+
+- A push to `main` that changes the server image files.
+- A tag whose name starts with `v`.
+- A pull request that changes the server image files. This run does not push an image.
+- A manual run from the Actions tab.
+
+The image name is `ghcr.io/bestony/healthconnect`.
+GHCR uses lowercase names.
+
+| Tag | When the workflow publishes it |
+| --- | --- |
+| `latest` | Push to the default branch. |
+| `main` | Push to the `main` branch. |
+| `sha-<commit>` | Every publish. |
+| `1.2.3`, `1.2`, `1` | Tag `v1.2.3`. |
+
+The image contains `linux/amd64` and `linux/arm64`.
+
+Allow this repository to write packages.
+Open Settings, Actions, General.
+Select "Read and write permissions".
+
+The first push creates the package and links it to this repository.
+A private repository creates a private package.
+Make the package public when CapRover must pull it without a credential.
+
 ### CapRover
 
 The repository root contains `captain-definition`.
 CapRover builds `server/Dockerfile`. The build context is the repository root.
+
+Deploy the published image when the CapRover host does not need to compile DuckDB.
+Set the image name to `ghcr.io/bestony/healthconnect:latest`.
+
+You can also deploy this repository. CapRover then builds `server/Dockerfile`.
 
 1. Create an app.
 2. Set the Container HTTP Port to `8080`.

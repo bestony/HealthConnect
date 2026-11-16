@@ -1,0 +1,60 @@
+# Build the healthd image and publish it to GHCR.
+# Pull requests build the image and do not push it.
+
+name: healthd image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "server/**"
+      - ".dockerignore"
+      - "captain-definition"
+      - ".github/workflows/healthd-image.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - ".dockerignore"
+      - "captain-definition"
+      - ".github/workflows/healthd-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+concurrency:
+  group: healthd-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  image:
+    # v1.19.0. Native runners build linux/amd64 and linux/arm64.
+    uses: docker/github-builder/.github/workflows/build.yml@a31d2311da4d55e21b978c1c52bab82ba97d51ee
+    with:
+      output: image
+      push: ${{ github.event_name != 'pull_request' }}
+      platforms: linux/amd64,linux/arm64
+      context: .
+      file: server/Dockerfile
+      cache: true
+      cache-mode: max
+      cache-scope: healthd
+      set-meta-labels: true
+      meta-images: ghcr.io/${{ github.repository }}
+      meta-tags: |
+        type=ref,event=branch
+        type=ref,event=pr
+        type=semver,pattern={{version}}
+        type=semver,pattern={{major}}.{{minor}}
+        type=semver,pattern={{major}}
+        type=sha,prefix=sha-
+    secrets:
+      registry-auths: |
+        - registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
