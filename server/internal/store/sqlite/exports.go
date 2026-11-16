@@ -27,18 +27,19 @@ type Export struct {
 	ReceivedBatchCount int64
 	CompletedAt        string
 	CreatedAt          string
+	Mode               string
 }
 
 // CreateExport inserts an open export.
-func (db *DB) CreateExport(ctx context.Context, id, userID, startedAt string) (Export, error) {
+func (db *DB) CreateExport(ctx context.Context, id, userID, startedAt, mode string) (Export, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := db.sql.ExecContext(ctx, `
-		INSERT INTO exports(id, user_id, started_at, status, received_batch_count, created_at)
-		VALUES (?, ?, ?, ?, 0, ?)`, id, userID, startedAt, ExportOpen, now)
+		INSERT INTO exports(id, user_id, started_at, status, received_batch_count, created_at, mode)
+		VALUES (?, ?, ?, ?, 0, ?, ?)`, id, userID, startedAt, ExportOpen, now, mode)
 	if err != nil {
 		return Export{}, fmt.Errorf("sqlite insert export: %w", err)
 	}
-	db.log.Info("export created", "export_id", id, "user_id", userID)
+	db.log.Info("export created", "export_id", id, "user_id", userID, "mode", mode)
 	return db.GetExport(ctx, userID, id)
 }
 
@@ -47,10 +48,10 @@ func (db *DB) GetExport(ctx context.Context, userID, id string) (Export, error) 
 	row := db.sql.QueryRowContext(ctx, `
 		SELECT id, user_id, started_at, status,
 		       COALESCE(sample_count, 0), COALESCE(batch_count, 0), received_batch_count,
-		       COALESCE(completed_at, ''), created_at
+		       COALESCE(completed_at, ''), created_at, COALESCE(mode, 'replace')
 		FROM exports WHERE user_id = ? AND id = ?`, userID, id)
 	var exp Export
-	err := row.Scan(&exp.ID, &exp.UserID, &exp.StartedAt, &exp.Status, &exp.SampleCount, &exp.BatchCount, &exp.ReceivedBatchCount, &exp.CompletedAt, &exp.CreatedAt)
+	err := row.Scan(&exp.ID, &exp.UserID, &exp.StartedAt, &exp.Status, &exp.SampleCount, &exp.BatchCount, &exp.ReceivedBatchCount, &exp.CompletedAt, &exp.CreatedAt, &exp.Mode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Export{}, ErrNotFound
 	}

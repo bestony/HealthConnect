@@ -51,10 +51,15 @@ Content-Type: application/json
 Request body:
 
 ```json
-{"startedAt":"2026-01-01T00:00:00.000Z"}
+{"startedAt":"2026-01-01T00:00:00.000Z","mode":"replace"}
 ```
 
 `startedAt` is an ISO-8601 date with fractional seconds.
+`mode` is optional. `replace` is the default. `replace` removes the user's stored facts and stores this export. `merge` adds rows and applies `kind` `deleted` records. Any other value is HTTP 400 `invalid_mode`.
+
+A `deleted` record has `kind`, `typeIdentifier`, and `uuid`. The server deletes stored rows with that `uuid`. A record with an empty `uuid` is ignored.
+
+A `merge` export upserts characteristic keys that are present. It does not remove other characteristic keys. A `replace` export replaces the characteristic set.
 
 Success response is HTTP 201:
 

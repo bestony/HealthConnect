@@ -5,6 +5,7 @@ import "time"
 
 // QuantitySample is one numeric HealthKit record.
 type QuantitySample struct {
+	HKUUID        string
 	Type          string
 	Value         float64
 	ValueText     string
@@ -24,6 +25,7 @@ type QuantitySample struct {
 
 // CategorySample is one categorical HealthKit record, such as a sleep segment.
 type CategorySample struct {
+	HKUUID        string
 	Type          string
 	ValueText     string
 	SourceName    string

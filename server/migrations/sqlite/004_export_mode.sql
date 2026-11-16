@@ -1,0 +1,1 @@
+ALTER TABLE exports ADD COLUMN mode TEXT NOT NULL DEFAULT 'replace';

@@ -263,6 +263,33 @@ func (db *DB) Requeue(ctx context.Context, userID, id string) (Import, error) {
 	return db.GetImport(ctx, userID, id)
 }
 
+// UpsertCharacteristics stores the keys present in attrs and leaves other keys in place.
+func (db *DB) UpsertCharacteristics(ctx context.Context, userID, importID string, attrs map[string]string) error {
+	if len(attrs) == 0 {
+		return nil
+	}
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sqlite begin characteristics: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for key, value := range attrs {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO characteristics(user_id, attr_key, attr_value, import_id)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(user_id, attr_key) DO UPDATE SET
+				attr_value = excluded.attr_value,
+				import_id = excluded.import_id`, userID, key, value, importID); err != nil {
+			return fmt.Errorf("sqlite upsert characteristic: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sqlite commit characteristics: %w", err)
+	}
+	db.log.Info("characteristics upserted", "user_id", userID, "import_id", importID, "count", len(attrs))
+	return nil
+}
+
 // ReplaceCharacteristics replaces the caller's <Me> attributes.
 func (db *DB) ReplaceCharacteristics(ctx context.Context, userID, importID string, attrs map[string]string) error {
 	tx, err := db.sql.BeginTx(ctx, nil)

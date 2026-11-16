@@ -43,13 +43,16 @@ func NewService(meta *sqlite.DB, facts *duckdb.DB, dataDir string, log *slog.Log
 func (s *Service) SetMaxBatchBytes(n int64) { s.maxBatch = n }
 
 // Create starts an export. exportID is 32 lowercase hex characters.
-func (s *Service) Create(ctx context.Context, userID, startedAt string) (string, error) {
+func (s *Service) Create(ctx context.Context, userID, startedAt, mode string) (string, error) {
+	if mode == "" {
+		mode = sqlite.ModeReplace
+	}
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}
 	id := hex.EncodeToString(raw)
-	if _, err := s.meta.CreateExport(ctx, id, userID, startedAt); err != nil {
+	if _, err := s.meta.CreateExport(ctx, id, userID, startedAt, mode); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -95,12 +98,21 @@ func (s *Service) Complete(ctx context.Context, userID, exportID string, sampleC
 		for i := int64(0); i < exp.ReceivedBatchCount; i++ {
 			paths = append(paths, s.batchPath(exportID, i))
 		}
-		chars, err := ingest.LoadNDJSON(ctx, s.facts, userID, dashed(exportID), paths)
+		mode := exp.Mode
+		if mode == "" {
+			mode = sqlite.ModeReplace
+		}
+		chars, err := ingest.LoadNDJSON(ctx, s.facts, userID, dashed(exportID), paths, mode)
 		if err != nil {
-			s.log.Error("export load failed", "export_id", exportID, "user_id", userID, "error_code", codeOf(err))
+			s.log.Error("export load failed", "export_id", exportID, "user_id", userID, "error_code", codeOf(err), "mode", mode)
 			return sqlite.Export{}, err
 		}
-		if err := s.meta.ReplaceCharacteristics(ctx, userID, exportID, chars); err != nil {
+		if mode == sqlite.ModeMerge {
+			err = s.meta.UpsertCharacteristics(ctx, userID, exportID, chars)
+		} else {
+			err = s.meta.ReplaceCharacteristics(ctx, userID, exportID, chars)
+		}
+		if err != nil {
 			return sqlite.Export{}, err
 		}
 	}

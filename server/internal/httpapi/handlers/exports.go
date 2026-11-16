@@ -23,6 +23,7 @@ type Exports struct {
 
 type createExportBody struct {
 	StartedAt string `json:"startedAt"`
+	Mode      string `json:"mode"`
 }
 
 type completeExportBody struct {
@@ -46,7 +47,15 @@ func (h Exports) Create(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "invalid_body")
 		return
 	}
-	id, err := h.Svc.Create(c.Request.Context(), userID, body.StartedAt)
+	mode := body.Mode
+	if mode == "" {
+		mode = sqlite.ModeReplace
+	}
+	if mode != sqlite.ModeReplace && mode != sqlite.ModeMerge {
+		writeError(c, http.StatusBadRequest, "invalid_mode")
+		return
+	}
+	id, err := h.Svc.Create(c.Request.Context(), userID, body.StartedAt, mode)
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "internal")
 		return

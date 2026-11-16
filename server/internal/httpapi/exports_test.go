@@ -194,6 +194,81 @@ func TestExportUploadContract(t *testing.T) {
 	if stillOpen.Code != http.StatusNoContent {
 		t.Fatalf("retry batch = %d %s", stillOpen.Code, stillOpen.Body.String())
 	}
+
+	badMode := postJSON(t, h, token, "/v1/exports", `{"startedAt":"2026-01-04T00:00:00.000Z","mode":"append"}`)
+	if badMode.Code != http.StatusBadRequest || !strings.Contains(badMode.Body.String(), `"error":"invalid_mode"`) {
+		t.Fatalf("bad mode = %d %s", badMode.Code, badMode.Body.String())
+	}
+}
+
+func TestExportMergeKeepsExistingRows(t *testing.T) {
+	stack := newStack(t, false)
+	h, token := stack.handler, stack.token
+	first := completeExport(t, h, token, "replace", exportFixture())
+
+	series := authed(t, h, token, http.MethodGet, "/v1/series?type=HKQuantityTypeIdentifierStepCount&from=2024-01-01T00:00:00Z&to=2024-01-03T00:00:00Z&grain=day&agg=sum")
+	if series.Code != http.StatusOK || !strings.Contains(series.Body.String(), `"value":1200`) {
+		t.Fatalf("baseline = %d %s", series.Code, series.Body.String())
+	}
+	_ = first
+
+	mergeBody := strings.Join([]string{
+		`{"device":"iPhone","end":"2024-01-02T02:00:00.000Z","kind":"sample","source":"com.apple.Health","start":"2024-01-02T01:00:00.000Z","typeIdentifier":"HKQuantityTypeIdentifierStepCount","unit":"count","uuid":"11111111-1111-1111-1111-111111111111","value":5}`,
+		`{"kind":"deleted","typeIdentifier":"HKQuantityTypeIdentifierStepCount","uuid":"E621E1F8-C36C-495A-93FC-0C247A3E6E5F"}`,
+		`{"activeEnergyBurnedGoalKcal":500,"activeEnergyBurnedKcal":900,"appleExerciseTimeMin":30,"appleMoveTimeGoalMin":30,"appleMoveTimeMin":40,"appleStandHours":8,"day":2,"exerciseTimeGoalMin":30,"kind":"activitySummary","month":1,"paused":false,"standHoursGoal":12,"typeIdentifier":"HKActivitySummaryTypeIdentifier","year":2024}`,
+		`{"kind":"deleted","typeIdentifier":"HKQuantityTypeIdentifierStepCount","uuid":""}`,
+	}, "\n") + "\n"
+	completeExport(t, h, token, "merge", mergeBody)
+
+	series = authed(t, h, token, http.MethodGet, "/v1/series?type=HKQuantityTypeIdentifierStepCount&from=2024-01-01T00:00:00Z&to=2024-01-03T00:00:00Z&grain=day&agg=sum")
+	if series.Code != http.StatusOK || !strings.Contains(series.Body.String(), `"value":5`) || strings.Contains(series.Body.String(), `"value":1200`) || strings.Contains(series.Body.String(), `"value":1205`) {
+		t.Fatalf("merged steps = %d %s", series.Code, series.Body.String())
+	}
+	sleep := authed(t, h, token, http.MethodGet, "/v1/records?type=HKCategoryTypeIdentifierSleepAnalysis&from=2024-01-01T00:00:00Z&to=2024-01-03T00:00:00Z")
+	if sleep.Code != http.StatusOK || !strings.Contains(sleep.Body.String(), `"value_text":"1"`) {
+		t.Fatalf("sleep after merge = %d %s", sleep.Code, sleep.Body.String())
+	}
+	activity := authed(t, h, token, http.MethodGet, "/v1/activity-summaries?from=2024-01-02&to=2024-01-03")
+	if activity.Code != http.StatusOK || !strings.Contains(activity.Body.String(), `"move_minutes":40`) || strings.Contains(activity.Body.String(), `"move_minutes":20`) {
+		t.Fatalf("activity = %d %s", activity.Code, activity.Body.String())
+	}
+	userID, err := stack.meta.UserIDByToken(context.Background(), token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sex, err := stack.meta.Characteristic(context.Background(), userID, "HKCharacteristicTypeIdentifierBiologicalSex")
+	if err != nil || sex != "2" {
+		t.Fatalf("sex after merge = %q %v", sex, err)
+	}
+
+	repeat := `{"device":"iPhone","end":"2024-01-02T02:00:00.000Z","kind":"sample","source":"com.apple.Health","start":"2024-01-02T01:00:00.000Z","typeIdentifier":"HKQuantityTypeIdentifierStepCount","unit":"count","uuid":"11111111-1111-1111-1111-111111111111","value":5}` + "\n"
+	completeExport(t, h, token, "merge", repeat)
+	series = authed(t, h, token, http.MethodGet, "/v1/series?type=HKQuantityTypeIdentifierStepCount&from=2024-01-01T00:00:00Z&to=2024-01-03T00:00:00Z&grain=day&agg=sum")
+	if series.Code != http.StatusOK || !strings.Contains(series.Body.String(), `"value":5`) || strings.Contains(series.Body.String(), `"value":10`) {
+		t.Fatalf("deduped steps = %d %s", series.Code, series.Body.String())
+	}
+}
+
+func completeExport(t *testing.T, h http.Handler, token, mode, body string) string {
+	t.Helper()
+	created := postJSON(t, h, token, "/v1/exports", `{"startedAt":"2026-01-05T00:00:00.000Z","mode":"`+mode+`"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create %s = %d %s", mode, created.Code, created.Body.String())
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(created.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	id := payload["exportId"]
+	batch := postRaw(t, h, token, "/v1/exports/"+id+"/batches", "application/x-ndjson", body)
+	if batch.Code != http.StatusNoContent {
+		t.Fatalf("batch %s = %d %s", mode, batch.Code, batch.Body.String())
+	}
+	done := postJSON(t, h, token, "/v1/exports/"+id+"/complete", `{"sampleCount":1,"batchCount":1}`)
+	if done.Code != http.StatusOK {
+		t.Fatalf("complete %s = %d %s", mode, done.Code, done.Body.String())
+	}
+	return id
 }
 
 func exportFixture() string {

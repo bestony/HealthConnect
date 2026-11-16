@@ -17,7 +17,10 @@ import (
 
 // LoadNDJSON reads stored batch files into the fact tables.
 // importID is a dashed UUID. chars receives characteristic values.
-func LoadNDJSON(ctx context.Context, facts *duckdb.DB, userID, importID string, paths []string) (map[string]string, error) {
+func LoadNDJSON(ctx context.Context, facts *duckdb.DB, userID, importID string, paths []string, mode string) (map[string]string, error) {
+	if mode == "" {
+		mode = "replace"
+	}
 	chars := map[string]string{}
 	err := facts.WithLoader(ctx, func(loader *duckdb.Loader) error {
 		for _, path := range paths {
@@ -31,7 +34,7 @@ func LoadNDJSON(ctx context.Context, facts *duckdb.DB, userID, importID string, 
 		_ = facts.DeleteStaging(ctx, importID)
 		return nil, err
 	}
-	if _, err := facts.CommitImport(ctx, userID, importID, "replace"); err != nil {
+	if _, err := facts.CommitImport(ctx, userID, importID, mode); err != nil {
 		_ = facts.DeleteStaging(ctx, importID)
 		return nil, err
 	}
@@ -138,6 +141,8 @@ func applyRecord(loader *duckdb.Loader, userID, importID string, rec ndRecord, c
 		return err
 	}
 	switch rec.kind {
+	case "deleted":
+		return nil
 	case "characteristic":
 		if rec.typeID != "" {
 			chars[rec.typeID] = characteristicValue(rec.fields)
@@ -187,6 +192,7 @@ func appendQuantity(loader *duckdb.Loader, userID, importID string, rec ndRecord
 		return err
 	}
 	return loader.AppendQuantity(userID, importID, domain.QuantitySample{
+		HKUUID: rec.uuid,
 		Type: rec.typeID, Value: value, ValueText: scalarString(rec.fields["value"]), Unit: unit,
 		SourceName: rec.source, Device: rec.device,
 		Start: sample.start, End: sample.end, StartRaw: rec.start, EndRaw: rec.end,
@@ -200,6 +206,7 @@ func appendCategory(loader *duckdb.Loader, userID, importID string, rec ndRecord
 		return err
 	}
 	return loader.AppendCategory(userID, importID, domain.CategorySample{
+		HKUUID: rec.uuid,
 		Type: rec.typeID, ValueText: text, SourceName: rec.source, Device: rec.device,
 		Start: sample.start, End: sample.end, StartRaw: rec.start, EndRaw: rec.end,
 		TZOffsetMin: sample.offset, Metadata: stringMap(rec.metadata),
@@ -233,6 +240,7 @@ func appendCorrelation(loader *duckdb.Loader, userID, importID string, rec ndRec
 				return err
 			}
 			item.Quantities = append(item.Quantities, domain.QuantitySample{
+				HKUUID: child.uuid,
 				Type: child.typeID, Value: value, ValueText: scalarString(child.fields["value"]), Unit: unit,
 				SourceName: child.source, Device: child.device,
 				Start: childSample.start, End: childSample.end, StartRaw: child.start, EndRaw: child.end,
@@ -246,6 +254,7 @@ func appendCorrelation(loader *duckdb.Loader, userID, importID string, rec ndRec
 				return err
 			}
 			item.Categories = append(item.Categories, domain.CategorySample{
+				HKUUID: child.uuid,
 				Type: child.typeID, ValueText: text, SourceName: child.source, Device: child.device,
 				Start: childSample.start, End: childSample.end, StartRaw: child.start, EndRaw: child.end,
 				TZOffsetMin: childSample.offset,

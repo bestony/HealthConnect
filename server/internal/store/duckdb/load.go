@@ -98,7 +98,7 @@ func (l *Loader) AppendQuantity(userID, importID string, sample domain.QuantityS
 		return err
 	}
 	if err := l.quantity.AppendRow(
-		user, imp, nil, domain.QuantityKey(userID, sample), sample.Type, sample.Value, sample.Unit,
+		user, imp, emptyNil(sample.HKUUID), domain.QuantityKey(userID, sample), sample.Type, sample.Value, sample.Unit,
 		sample.SourceName, emptyNil(sample.SourceVersion), emptyNil(sample.Device),
 		sample.Start.UTC(), sample.End.UTC(), int16(sample.TZOffsetMin), timeOrNil(sample.Creation),
 		jsonMap(sample.Metadata), jsonMap(sample.Attrs),
@@ -115,7 +115,7 @@ func (l *Loader) AppendCategory(userID, importID string, sample domain.CategoryS
 		return err
 	}
 	if err := l.category.AppendRow(
-		user, imp, nil, domain.CategoryKey(userID, sample), sample.Type, sample.ValueText,
+		user, imp, emptyNil(sample.HKUUID), domain.CategoryKey(userID, sample), sample.Type, sample.ValueText,
 		sample.SourceName, emptyNil(sample.SourceVersion), emptyNil(sample.Device),
 		sample.Start.UTC(), sample.End.UTC(), int16(sample.TZOffsetMin), timeOrNil(sample.Creation),
 		jsonMap(sample.Metadata), jsonMap(sample.Attrs),
@@ -136,7 +136,7 @@ func (l *Loader) AppendCorrelation(userID, importID string, item domain.Correlat
 		return err
 	}
 	if err := l.correlation.AppendRow(
-		corrID, user, imp, nil, domain.CorrelationKey(userID, item), item.Type,
+		corrID, user, imp, emptyNil(item.ID), domain.CorrelationKey(userID, item), item.Type,
 		item.SourceName, emptyNil(item.SourceVersion), emptyNil(item.Device),
 		item.Start.UTC(), item.End.UTC(), int16(item.TZOffsetMin), timeOrNil(item.Creation),
 		jsonMap(item.Metadata), jsonMap(item.Attrs),
@@ -182,7 +182,7 @@ func (l *Loader) AppendWorkout(userID, importID string, item domain.Workout) err
 		return err
 	}
 	if err := l.workouts.AppendRow(
-		workoutID, user, imp, nil, domain.WorkoutKey(userID, item), item.ActivityType,
+		workoutID, user, imp, emptyNil(item.ID), domain.WorkoutKey(userID, item), item.ActivityType,
 		f64(item.DurationSec), f64(item.Distance), emptyNil(item.DistanceUnit),
 		f64(item.Energy), emptyNil(item.EnergyUnit), item.SourceName,
 		emptyNil(item.SourceVersion), emptyNil(item.Device),
@@ -287,6 +287,31 @@ func (db *DB) WithLoader(ctx context.Context, fn func(*Loader) error) error {
 	})
 }
 
+func mergePrepare(ctx context.Context, tx *sql.Tx, userID, importID string) error {
+	deleted := `SELECT hk_uuid FROM health_records_staging WHERE import_id = CAST(? AS UUID) AND kind = 'deleted' AND hk_uuid IS NOT NULL AND hk_uuid <> ''`
+	statements := []string{
+		`DELETE FROM quantity_samples WHERE user_id = CAST(? AS UUID) AND hk_uuid IN (` + deleted + `)`,
+		`DELETE FROM category_samples WHERE user_id = CAST(? AS UUID) AND hk_uuid IN (` + deleted + `)`,
+		`DELETE FROM correlation_members WHERE correlation_id IN (
+		   SELECT id FROM correlations WHERE user_id = CAST(? AS UUID) AND hk_uuid IN (` + deleted + `))`,
+		`DELETE FROM correlations WHERE user_id = CAST(? AS UUID) AND hk_uuid IN (` + deleted + `)`,
+		`DELETE FROM workout_events WHERE workout_id IN (
+		   SELECT id FROM workouts WHERE user_id = CAST(? AS UUID) AND hk_uuid IN (` + deleted + `))`,
+		`DELETE FROM workout_statistics WHERE workout_id IN (
+		   SELECT id FROM workouts WHERE user_id = CAST(? AS UUID) AND hk_uuid IN (` + deleted + `))`,
+		`DELETE FROM workouts WHERE user_id = CAST(? AS UUID) AND hk_uuid IN (` + deleted + `)`,
+		`DELETE FROM health_records WHERE user_id = CAST(? AS UUID) AND hk_uuid IN (` + deleted + `)`,
+		`DELETE FROM activity_summaries WHERE user_id = CAST(? AS UUID) AND day IN (
+		   SELECT day FROM activity_summaries_staging WHERE import_id = CAST(? AS UUID))`,
+	}
+	for _, stmt := range statements {
+		if _, err := tx.ExecContext(ctx, stmt, userID, importID); err != nil {
+			return fmt.Errorf("duckdb merge prepare: %w", err)
+		}
+	}
+	return nil
+}
+
 // CommitImport moves staging rows into the fact tables.
 func (db *DB) CommitImport(ctx context.Context, userID, importID, mode string) (int64, error) {
 	tx, err := db.sql.BeginTx(ctx, nil)
@@ -294,6 +319,11 @@ func (db *DB) CommitImport(ctx context.Context, userID, importID, mode string) (
 		return 0, fmt.Errorf("duckdb begin commit: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if mode == "merge" {
+		if err := mergePrepare(ctx, tx, userID, importID); err != nil {
+			return 0, err
+		}
+	}
 	if mode == "replace" {
 		statements := []string{
 			`DELETE FROM correlation_members WHERE correlation_id IN (SELECT id FROM correlations WHERE user_id = CAST(? AS UUID))`,
@@ -337,8 +367,17 @@ func (db *DB) CommitImport(ctx context.Context, userID, importID, mode string) (
 		`INSERT INTO activity_summaries SELECT * FROM activity_summaries_staging s
 		 WHERE s.import_id = CAST(? AS UUID) AND NOT EXISTS (
 		   SELECT 1 FROM activity_summaries a WHERE a.user_id = s.user_id AND a.day = s.day)`,
-		`INSERT INTO health_records SELECT * FROM health_records_staging WHERE import_id = CAST(? AS UUID)`,
 	}
+	healthInsert := `INSERT INTO health_records SELECT * FROM health_records_staging
+		 WHERE import_id = CAST(? AS UUID) AND kind <> 'deleted'`
+	if mode == "merge" {
+		healthInsert = `INSERT INTO health_records SELECT * FROM health_records_staging s
+		 WHERE s.import_id = CAST(? AS UUID) AND s.kind <> 'deleted'
+		   AND (s.hk_uuid IS NULL OR s.hk_uuid = '' OR NOT EXISTS (
+		     SELECT 1 FROM health_records h
+		     WHERE h.user_id = s.user_id AND h.hk_uuid = s.hk_uuid AND h.kind = s.kind))`
+	}
+	inserts = append(inserts, healthInsert)
 	for _, stmt := range inserts {
 		if _, err := tx.ExecContext(ctx, stmt, importID); err != nil {
 			return 0, fmt.Errorf("duckdb commit insert: %w", err)
