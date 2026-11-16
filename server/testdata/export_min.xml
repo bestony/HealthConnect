@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HealthData locale="en_US">
+ <ExportDate value="2024-01-02 08:00:00 +0800"/>
+ <Me HKCharacteristicTypeIdentifierDateOfBirth="1990-05-06" HKCharacteristicTypeIdentifierBiologicalSex="HKBiologicalSexMale"/>
+ <Record type="HKQuantityTypeIdentifierStepCount" sourceName="iPhone" sourceVersion="17.0" unit="count" creationDate="2024-01-02 09:00:00 +0800" startDate="2024-01-02 08:00:00 +0800" endDate="2024-01-02 09:00:00 +0800" value="1200">
+  <MetadataEntry key="HKMetadataKeyWasUserEntered" value="0"/>
+ </Record>
+ <Record type="HKCategoryTypeIdentifierSleepAnalysis" sourceName="Apple Watch" sourceVersion="10.2" creationDate="2024-01-02 07:00:00 +0800" startDate="2024-01-01 23:30:00 +0800" endDate="2024-01-02 06:30:00 +0800" value="HKCategoryValueSleepAnalysisAsleepCore"/>
+ <Record type="HKCategoryTypeIdentifierAppleStandHour" sourceName="Apple Watch" creationDate="2024-01-02 11:00:00 +0800" startDate="2024-01-02 10:00:00 +0800" endDate="2024-01-02 11:00:00 +0800" value="0"/>
+ <Correlation type="HKCorrelationTypeIdentifierBloodPressure" sourceName="Monitor" sourceVersion="1" creationDate="2024-01-02 12:00:00 +0800" startDate="2024-01-02 12:00:00 +0800" endDate="2024-01-02 12:01:00 +0800">
+  <Record type="HKQuantityTypeIdentifierBloodPressureSystolic" sourceName="Monitor" unit="mmHg" value="118" startDate="2024-01-02 12:00:00 +0800" endDate="2024-01-02 12:01:00 +0800" creationDate="2024-01-02 12:00:00 +0800"/>
+  <Record type="HKQuantityTypeIdentifierBloodPressureDiastolic" sourceName="Monitor" unit="mmHg" value="76" startDate="2024-01-02 12:00:00 +0800" endDate="2024-01-02 12:01:00 +0800" creationDate="2024-01-02 12:00:00 +0800"/>
+ </Correlation>
+ <Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="30" durationUnit="min" totalDistance="5" totalDistanceUnit="km" totalEnergyBurned="300" totalEnergyBurnedUnit="kcal" sourceName="Apple Watch" sourceVersion="10.2" creationDate="2024-01-02 18:00:00 +0800" startDate="2024-01-02 17:00:00 +0800" endDate="2024-01-02 17:30:00 +0800" indoor="0">
+  <MetadataEntry key="HKIndoorWorkout" value="0"/>
+  <WorkoutEvent type="HKWorkoutEventTypePause" date="2024-01-02 17:10:00 +0800" duration="1" durationUnit="min"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierHeartRate" startDate="2024-01-02 17:00:00 +0800" endDate="2024-01-02 17:30:00 +0800" average="150" minimum="120" maximum="170" sum="9000" unit="count/min"/>
+  <WorkoutRoute sourceName="Apple Watch"></WorkoutRoute>
+ </Workout>
+ <ActivitySummary dateComponents="2024-01-02" activeEnergyBurned="400" activeEnergyBurnedGoal="500" activeEnergyBurnedUnit="kcal" appleExerciseTime="30" appleExerciseTimeGoal="30" appleStandHours="8" appleStandHoursGoal="12" appleMoveTime="20" appleMoveTimeGoal="30"/>
+ <ClinicalRecord type="ignored"/>
+</HealthData>

@@ -7,3 +7,8 @@ import "embed"
 //
 //go:embed sqlite/*.sql
 var SQLite embed.FS
+
+// DuckDB is the set of DuckDB migration files. Names start with a zero-padded version.
+//
+//go:embed duckdb/*.sql
+var DuckDB embed.FS
