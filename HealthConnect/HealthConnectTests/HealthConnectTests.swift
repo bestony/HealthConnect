@@ -16,6 +16,11 @@ struct ServerEndpointTests {
         #expect(loopback.url.host == "127.0.0.1")
         let localName = try ServerEndpoint.parse(address: "http://health.local:8080", verificationCode: "secret").get()
         #expect(localName.url.host == "health.local")
+        let ipv6Loopback = try ServerEndpoint.parse(address: "http://[::1]:8080", verificationCode: "secret").get()
+        #expect(ipv6Loopback.url.host == "::1")
+        #expect(ipv6Loopback.url(for: "v1/exports").absoluteString == "http://[::1]:8080/v1/exports")
+        let expanded = try ServerEndpoint.parse(address: "http://[0:0:0:0:0:0:0:1]:8080", verificationCode: "secret").get()
+        #expect(expanded.url.host == "0:0:0:0:0:0:0:1")
     }
 
     @Test func rejectsMissingHostBadSchemeAndPublicHTTP() {
@@ -25,6 +30,7 @@ struct ServerEndpointTests {
         #expect(ServerEndpoint.parse(address: "ftp://example.com", verificationCode: "code") == .failure(.unsupportedScheme))
         #expect(ServerEndpoint.parse(address: "http://example.com", verificationCode: "code") == .failure(.publicHTTP))
         #expect(ServerEndpoint.parse(address: "https://user:pass@example.com", verificationCode: "code") == .failure(.invalidURL))
+        #expect(ServerEndpoint.parse(address: "", verificationCode: "") == .failure(.emptyAddress))
     }
 }
 
@@ -84,6 +90,15 @@ struct HealthAccessTests {
 }
 
 @MainActor
+struct AuthorizationDenialTests {
+    @Test func readsDisallowedTypeNames() {
+        let reason = "Authorization to read the following types is disallowed: HKVisionPrescriptionTypeIdentifier, HKCorrelationTypeIdentifierFood"
+        let names = AuthorizationDenial.identifiers(in: reason)
+        #expect(names == Set(["HKVisionPrescriptionTypeIdentifier", "HKCorrelationTypeIdentifierFood"]))
+    }
+}
+
+@MainActor
 struct CatalogTests {
     @Test func catalogIncludesSupportedTypesAndExcludesClinicalRecordsAndRoutes() {
         let names = HealthTypeCatalog.declaredIdentifiers
@@ -121,6 +136,52 @@ struct ExportEncodingTests {
         let text = try #require(String(data: body, encoding: .utf8))
         #expect(text.contains("\"note\":\"keep-me\""))
         #expect(text.hasSuffix("\n"))
+    }
+
+    @Test func recordKindStaysSampleWhenAFieldUsesTheSameName() throws {
+        let record = ExportRecord(
+            kind: "sample",
+            typeIdentifier: "HKStateOfMindType",
+            fields: ["kind": .string("momentaryEmotion"), "valence": .number(0.2)]
+        )
+        let text = try #require(String(data: ExportPageEncoder.encode([record]), encoding: .utf8))
+        #expect(text.contains("\"kind\":\"sample\""))
+        #expect(text.contains("\"field_kind\":\"momentaryEmotion\""))
+        #expect(!text.contains("\"kind\":\"momentaryEmotion\""))
+    }
+
+    @Test func startedAtUsesFractionalSeconds() throws {
+        struct Body: Encodable { var startedAt: Date }
+        let data = try ExportJSON.encoder().encode(Body(startedAt: Date(timeIntervalSince1970: 1_767_225_600)))
+        let text = try #require(String(data: data, encoding: .utf8))
+        #expect(text.contains("2026-01-01T00:00:00.000Z"))
+    }
+
+    @Test func oneLargeArrayStaysWithinTheBatchLimit() throws {
+        let items = (0..<20).map { _ in ExportValue.string(String(repeating: "a", count: 40)) }
+        let record = ExportRecord(
+            kind: "sample",
+            typeIdentifier: "HKElectrocardiogramType",
+            fields: ["voltages": .array(items)]
+        )
+        let groups = try ExportBatchSizer.groups(records: [record], maxBytes: 350)
+        #expect(groups.count > 1)
+        #expect(groups.allSatisfy { $0.count <= 350 })
+    }
+
+    @Test func oneUnsplittableRecordIsRejected() {
+        let record = ExportRecord(
+            kind: "sample",
+            typeIdentifier: "HKQuantityTypeIdentifierStepCount",
+            fields: ["note": .string(String(repeating: "a", count: 200))]
+        )
+        do {
+            _ = try ExportBatchSizer.groups(records: [record], maxBytes: 80)
+            Issue.record("Expected an oversized record to fail")
+        } catch ExportBatchError.recordTooLarge {
+        } catch {
+            Issue.record("Unexpected error \(error)")
+        }
     }
 }
 
@@ -178,6 +239,39 @@ struct UploadFlowTests {
         #expect(skipped.events == ["create", "batch"])
     }
 
+    @Test func anOversizedRecordDoesNotCompleteOrLock() async throws {
+        let settings = makeSettings()
+        let endpoint = try ServerEndpoint.parse(address: "https://example.com", verificationCode: "code").get()
+        try settings.save(endpoint)
+        let transport = RecordingTransport()
+        let client = ScriptedAuthorizationClient()
+        client.status = .unnecessary
+        let session = UploadSession(
+            settings: settings,
+            access: HealthAccessCoordinator(client: client),
+            makeExporter: {
+                ScriptedExporter(skipped: [], records: [
+                    ExportRecord(
+                        kind: "sample",
+                        typeIdentifier: "HKQuantityTypeIdentifierStepCount",
+                        fields: ["note": .string(String(repeating: "a", count: 200))]
+                    ),
+                ])
+            },
+            makeUploader: {
+                var uploader = ExportUploader(transport: transport)
+                uploader.maxBatchBytes = 80
+                return uploader
+            }
+        )
+        await session.reload()
+        await session.performUpload()
+        #expect(session.phase == .uploadFailed("有一条记录超过上传大小限制。上传未完成。"))
+        #expect(session.canUpload)
+        #expect(settings.receipt() == nil)
+        #expect(transport.events == ["create"])
+    }
+
     private func makeSettings() -> SettingsStore {
         let suite = "HealthConnectTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -231,10 +325,14 @@ final class ScriptedExporter: HealthExporting {
     var totalUnitCount = 1
     var currentTypeIdentifier = "HKQuantityTypeIdentifierStepCount"
     var skippedTypeIdentifiers: [String]
+    private let records: [ExportRecord]
     private var served = false
 
-    init(skipped: [String]) {
+    init(skipped: [String], records: [ExportRecord]? = nil) {
         skippedTypeIdentifiers = skipped
+        self.records = records ?? [
+            ExportRecord(kind: "sample", typeIdentifier: "HKQuantityTypeIdentifierStepCount", fields: ["value": .int(1)]),
+        ]
     }
 
     func nextPage() async throws -> ExportPage? {
@@ -242,9 +340,7 @@ final class ScriptedExporter: HealthExporting {
             return nil
         }
         served = true
-        return ExportPage(typeIdentifier: currentTypeIdentifier, records: [
-            ExportRecord(kind: "sample", typeIdentifier: currentTypeIdentifier, fields: ["value": .int(1)]),
-        ])
+        return ExportPage(typeIdentifier: currentTypeIdentifier, records: records)
     }
 }
 

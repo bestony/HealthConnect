@@ -71,10 +71,11 @@ final class AppModel {
 
     static func live() -> AppModel {
         let settings = SettingsStore(defaults: .standard, credentials: KeychainCredentialStore())
+        let readableTypes = ReadableTypeFilter()
         let session = UploadSession(
             settings: settings,
-            access: HealthAccessCoordinator(client: HealthKitAuthorizationClient()),
-            makeExporter: { HealthKitExportSession() },
+            access: HealthAccessCoordinator(client: HealthKitAuthorizationClient(readableTypes: readableTypes)),
+            makeExporter: { HealthKitExportSession(readableTypes: readableTypes) },
             makeUploader: { ExportUploader(transport: URLSessionExportTransport()) }
         )
         return AppModel(settings: settings, session: session)

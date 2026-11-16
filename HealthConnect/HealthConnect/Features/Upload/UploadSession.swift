@@ -111,6 +111,9 @@ final class UploadSession {
             phase = .uploadFailed("验证码被服务器拒绝。")
         } catch UploadError.incomplete(let skipped) {
             phase = .uploadFailed("有 \(skipped) 类数据未能读取。上传未完成，可以重试。")
+        } catch ExportBatchError.recordTooLarge {
+            AppLog.upload.error("One record is larger than the upload limit")
+            phase = .uploadFailed("有一条记录超过上传大小限制。上传未完成。")
         } catch {
             AppLog.upload.error("Upload failed")
             phase = .uploadFailed("上传失败。可以重试。")

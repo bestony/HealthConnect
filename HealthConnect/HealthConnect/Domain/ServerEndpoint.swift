@@ -17,14 +17,6 @@ nonisolated struct ServerEndpoint: Equatable, Sendable {
     }
 
     static func parse(address: String, verificationCode: String) -> Result<ServerEndpoint, EndpointValidationError> {
-        let code = verificationCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        if code.isEmpty {
-            return .failure(.emptyCode)
-        }
-        if code.count > 256 || code.contains(where: \.isNewline) {
-            return .failure(.invalidCode)
-        }
-
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             return .failure(.emptyAddress)
@@ -35,7 +27,8 @@ nonisolated struct ServerEndpoint: Equatable, Sendable {
         guard components.user == nil, components.password == nil else {
             return .failure(.invalidURL)
         }
-        guard let scheme = components.scheme?.lowercased(), let host = components.host, !host.isEmpty else {
+        let host = url.host ?? components.host
+        guard let scheme = components.scheme?.lowercased(), let host, !host.isEmpty else {
             return .failure(.invalidURL)
         }
         if scheme != "https" && scheme != "http" {
@@ -44,12 +37,19 @@ nonisolated struct ServerEndpoint: Equatable, Sendable {
         if scheme == "http" && !isLocalHost(host) {
             return .failure(.publicHTTP)
         }
+        let code = verificationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        if code.isEmpty {
+            return .failure(.emptyCode)
+        }
+        if code.count > 256 || code.contains(where: \.isNewline) {
+            return .failure(.invalidCode)
+        }
         return .success(ServerEndpoint(url: url, verificationCode: code))
     }
 
     private static func isLocalHost(_ host: String) -> Bool {
         let name = host.lowercased()
-        if name == "localhost" || name == "::1" || name.hasSuffix(".local") {
+        if name == "localhost" || isIPv6Loopback(name) || name.hasSuffix(".local") {
             return true
         }
         let parts = name.split(separator: ".")
@@ -70,6 +70,15 @@ nonisolated struct ServerEndpoint: Equatable, Sendable {
             return true
         }
         return false
+    }
+
+    private static func isIPv6Loopback(_ host: String) -> Bool {
+        var name = host.lowercased()
+        if name.hasPrefix("["), name.hasSuffix("]") {
+            name.removeFirst()
+            name.removeLast()
+        }
+        return name == "::1" || name == "0:0:0:0:0:0:0:1"
     }
 }
 

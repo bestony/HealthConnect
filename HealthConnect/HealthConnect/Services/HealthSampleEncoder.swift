@@ -258,7 +258,7 @@ enum HealthSampleEncoder {
     }
 
     private static func apply(_ mind: HKStateOfMind, to record: inout ExportRecord) {
-        record.fields["kind"] = .string(String(describing: mind.kind))
+        record.fields["stateOfMindKind"] = .string(String(describing: mind.kind))
         record.fields["valence"] = .number(mind.valence)
         record.fields["valenceClassification"] = .string(String(describing: mind.valenceClassification))
         record.fields["labels"] = .array(mind.labels.map { .string(String(describing: $0)) })

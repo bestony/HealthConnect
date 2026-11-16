@@ -14,6 +14,7 @@ protocol ExportTransport: AnyObject {
 
 struct ExportUploader {
     var transport: ExportTransport
+    var maxBatchBytes: Int = ExportBatchSizer.maxBytes
     var onProgress: (@MainActor (UploadProgress) -> Void)?
 
     func upload(endpoint: ServerEndpoint, exporter: HealthExporting) async throws -> UploadSummary {
@@ -25,14 +26,14 @@ struct ExportUploader {
 
         while let page = try await exporter.nextPage() {
             try Task.checkCancellation()
-            let groups = try ExportBatchSizer.groups(records: page.records)
+            let groups = try ExportBatchSizer.groups(records: page.records, maxBytes: maxBatchBytes)
             for body in groups {
                 try Task.checkCancellation()
                 try await transport.uploadBatch(endpoint: endpoint, exportID: exportID, body: body)
                 batchCount += 1
                 byteCount += body.count
+                sampleCount += body.filter { $0 == 0x0A }.count
             }
-            sampleCount += page.records.count
             let progress = UploadProgress(
                 currentTypeIdentifier: exporter.currentTypeIdentifier,
                 completedUnitCount: exporter.completedUnitCount,

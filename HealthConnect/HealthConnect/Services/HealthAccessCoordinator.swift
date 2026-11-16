@@ -15,6 +15,7 @@ nonisolated enum HealthAccessState: Equatable, Sendable {
 
 enum HealthAuthorizationError: Error {
     case canceled
+    case failed
 }
 
 protocol HealthAuthorizationClient: AnyObject {

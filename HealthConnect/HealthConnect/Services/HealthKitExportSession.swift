@@ -20,6 +20,7 @@ enum ExportFailure: Error {
 /// Vision prescriptions can also require a separate per-object choice. This session uploads the samples the first authorization allows.
 final class HealthKitExportSession: HealthExporting {
     private let store: HKHealthStore
+    private let readableTypes: ReadableTypeFilter
     private let pageLimit: Int
     private var didReadCharacteristics = false
     private var didReadActivity = false
@@ -37,8 +38,13 @@ final class HealthKitExportSession: HealthExporting {
         sampleTypes.count + 3
     }
 
-    init(store: HKHealthStore = HKHealthStore(), pageLimit: Int = 500) {
+    init(
+        store: HKHealthStore = HKHealthStore(),
+        readableTypes: ReadableTypeFilter? = nil,
+        pageLimit: Int = 500
+    ) {
         self.store = store
+        self.readableTypes = readableTypes ?? ReadableTypeFilter()
         self.pageLimit = pageLimit
     }
 
@@ -55,8 +61,13 @@ final class HealthKitExportSession: HealthExporting {
         }
 
         if !preparedSamples {
-            sampleTypes = HealthTypeCatalog.sampleTypes
+            let available = HealthTypeCatalog.sampleTypes.filter { readableTypes.allows($0.identifier) }
+            let omitted = HealthTypeCatalog.sampleTypes.count - available.count
+            sampleTypes = available
             preparedSamples = true
+            if omitted > 0 {
+                AppLog.health.info("Omitted \(omitted, privacy: .public) sample types that HealthKit will not authorize")
+            }
             AppLog.health.info("Export will read \(self.sampleTypes.count, privacy: .public) sample types")
         }
 
@@ -83,6 +94,11 @@ final class HealthKitExportSession: HealthExporting {
         if !didReadActivity {
             didReadActivity = true
             currentTypeIdentifier = HKObjectType.activitySummaryType().identifier
+            guard readableTypes.allows(currentTypeIdentifier) else {
+                completedUnitCount = sampleTypes.count + 2
+                AppLog.health.info("Omitted activity summaries because HealthKit will not authorize them")
+                return try await nextPage()
+            }
             do {
                 let summaries = try await HKActivitySummaryQueryDescriptor(predicate: nil).result(for: store)
                 let records = HealthSampleEncoder.activityRecords(summaries)
@@ -100,6 +116,11 @@ final class HealthKitExportSession: HealthExporting {
         if !didReadMedications {
             didReadMedications = true
             currentTypeIdentifier = HKObjectType.userAnnotatedMedicationType().identifier
+            guard readableTypes.allows(currentTypeIdentifier) else {
+                completedUnitCount = sampleTypes.count + 3
+                AppLog.health.info("Omitted annotated medications because HealthKit will not authorize them")
+                return nil
+            }
             do {
                 let medications = try await HKUserAnnotatedMedicationQueryDescriptor().result(for: store)
                 let records = HealthSampleEncoder.medicationRecords(medications)

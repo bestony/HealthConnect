@@ -43,6 +43,10 @@ nonisolated struct ExportRecord: Equatable, Sendable {
 }
 
 extension ExportRecord: Encodable {
+    private static let structuralKeys: Set<String> = [
+        "kind", "typeIdentifier", "uuid", "start", "end", "source", "device", "metadata", "objects",
+    ]
+
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: DynamicCodingKey.self)
         try container.encode(kind, forKey: DynamicCodingKey("kind"))
@@ -53,9 +57,11 @@ extension ExportRecord: Encodable {
         try container.encodeIfPresent(source, forKey: DynamicCodingKey("source"))
         try container.encodeIfPresent(device, forKey: DynamicCodingKey("device"))
         for key in fields.keys.sorted() {
-            if let value = fields[key] {
-                try container.encode(value, forKey: DynamicCodingKey(key))
+            guard let value = fields[key] else {
+                continue
             }
+            let name = Self.structuralKeys.contains(key) ? "field_\(key)" : key
+            try container.encode(value, forKey: DynamicCodingKey(name))
         }
         if !metadata.isEmpty {
             try container.encode(metadata, forKey: DynamicCodingKey("metadata"))
@@ -110,26 +116,111 @@ enum ExportPageEncoder {
     }
 }
 
+enum ExportBatchError: Error, Equatable {
+    case recordTooLarge
+}
+
 enum ExportBatchSizer {
     static let maxBytes = 8_000_000
 
-    static func groups(records: [ExportRecord]) throws -> [Data] {
+    static func groups(records: [ExportRecord], maxBytes: Int = ExportBatchSizer.maxBytes) throws -> [Data] {
+        let pieces = try records.flatMap { try split($0, maxBytes: maxBytes) }
         var groups: [Data] = []
         var current: [ExportRecord] = []
         var currentBytes = 0
-        for record in records {
-            let encoded = try ExportPageEncoder.encode([record])
+        for piece in pieces {
+            let encoded = try ExportPageEncoder.encode([piece])
+            if encoded.count > maxBytes {
+                throw ExportBatchError.recordTooLarge
+            }
             if !current.isEmpty && currentBytes + encoded.count > maxBytes {
                 groups.append(try ExportPageEncoder.encode(current))
                 current = []
                 currentBytes = 0
             }
-            current.append(record)
+            current.append(piece)
             currentBytes += encoded.count
         }
         if !current.isEmpty {
             groups.append(try ExportPageEncoder.encode(current))
         }
         return groups
+    }
+
+    private static func split(_ record: ExportRecord, maxBytes: Int) throws -> [ExportRecord] {
+        let encoded = try ExportPageEncoder.encode([record])
+        if encoded.count <= maxBytes {
+            return [record]
+        }
+        if let key = largestArrayKey(record), case .array(let items) = record.fields[key] {
+            do {
+                return try splitCollection(record, count: items.count, maxBytes: maxBytes) { count in
+                    var piece = record
+                    piece.fields[key] = .array(Array(items.prefix(count)))
+                    return piece
+                } advance: { count in
+                    var rest = record
+                    rest.fields[key] = .array(Array(items.dropFirst(count)))
+                    return rest
+                }
+            } catch ExportBatchError.recordTooLarge {
+            }
+        }
+        if let objects = record.objects, objects.count > 1 {
+            return try splitCollection(record, count: objects.count, maxBytes: maxBytes) { count in
+                var piece = record
+                piece.objects = Array(objects.prefix(count))
+                return piece
+            } advance: { count in
+                var rest = record
+                rest.objects = Array(objects.dropFirst(count))
+                return rest
+            }
+        }
+        throw ExportBatchError.recordTooLarge
+    }
+
+    private static func splitCollection(
+        _ record: ExportRecord,
+        count: Int,
+        maxBytes: Int,
+        piece: (Int) -> ExportRecord,
+        advance: (Int) -> ExportRecord
+    ) throws -> [ExportRecord] {
+        var taken = count
+        var chosen: ExportRecord?
+        while taken >= 1 {
+            let candidate = piece(taken)
+            let size = try ExportPageEncoder.encode([candidate]).count
+            if size <= maxBytes {
+                chosen = candidate
+                break
+            }
+            if taken == 1 {
+                throw ExportBatchError.recordTooLarge
+            }
+            taken = max(taken / 2, 1)
+        }
+        guard let chosen else {
+            throw ExportBatchError.recordTooLarge
+        }
+        var records = try split(chosen, maxBytes: maxBytes)
+        if taken < count {
+            records.append(contentsOf: try split(advance(taken), maxBytes: maxBytes))
+        }
+        return records
+    }
+
+    private static func largestArrayKey(_ record: ExportRecord) -> String? {
+        var best: (key: String, count: Int)?
+        for key in record.fields.keys.sorted() {
+            guard case .array(let items) = record.fields[key], items.count > 1 else {
+                continue
+            }
+            if best == nil || items.count > best!.count {
+                best = (key, items.count)
+            }
+        }
+        return best?.key
     }
 }

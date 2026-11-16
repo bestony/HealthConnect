@@ -7,10 +7,7 @@ final class URLSessionExportTransport: ExportTransport {
 
     init(session: URLSession = URLSessionExportTransport.makeSession()) {
         self.session = session
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        self.encoder = encoder
+        self.encoder = ExportJSON.encoder()
     }
 
     func createExport(endpoint: ServerEndpoint) async throws -> String {
@@ -107,6 +104,18 @@ final class URLSessionExportTransport: ExportTransport {
         configuration.timeoutIntervalForResource = 300
         configuration.waitsForConnectivity = true
         return URLSession(configuration: configuration)
+    }
+}
+
+enum ExportJSON {
+    static func encoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(ExportDate.string(from: date))
+        }
+        return encoder
     }
 }
 
