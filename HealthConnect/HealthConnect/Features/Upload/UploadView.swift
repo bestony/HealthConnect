@@ -18,14 +18,20 @@ struct UploadView: View {
                         .foregroundStyle(.secondary)
                 }
                 if case .uploading(let progress) = model.session.phase {
+                    Text(progress.kind == .full ? "全量上传" : "增量上传")
                     ProgressView(
                         value: Double(progress.completedUnitCount),
                         total: Double(max(progress.totalUnitCount, 1))
                     )
-                    Text(progress.currentTypeIdentifier)
+                    Text("\(progress.completedUnitCount)/\(progress.totalUnitCount)")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text("已上传 \(progress.sampleCount) 条")
+                    if !progress.currentTypeIdentifier.isEmpty {
+                        Text(progress.currentTypeIdentifier)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("已上传 \(progress.sampleCount) 条，\(progress.byteCount) 字节")
                 }
                 if case .succeeded(let receipt) = model.session.phase {
                     Text("已上传 \(receipt.sampleCount) 条")
@@ -42,7 +48,9 @@ struct UploadView: View {
                 }
                 .disabled(!model.session.canUpload && !model.session.canRequestAuthorization)
             } footer: {
-                Text("请保持 HealthConnect 在前台，直到上传完成。成功后，这个按钮会锁定。更换服务器或验证码后可以再次上传。")
+                Text(model.session.hasCommittedAnchors
+                    ? "新增的健康数据会在系统唤醒后自动上传。全量上传会替换服务器上的副本。离开前台后，系统可能在时间用完时中断全量上传。"
+                    : "完成一次全量上传后，新增数据会自动上传。全量上传会替换服务器上的副本。")
             }
 
             Section {
@@ -58,7 +66,7 @@ struct UploadView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
-                model.session.cancelForBackground()
+                model.session.sceneLeftForeground()
             }
         }
     }
@@ -76,8 +84,10 @@ struct UploadView: View {
         case .uploading:
             "正在上传。请不要离开此应用。"
         case .succeeded:
-            "上传已完成。"
+            "上传已完成。可以再次上传全部数据。"
         case .uploadFailed(let message):
+            message
+        case .interrupted(let message):
             message
         }
     }
@@ -95,8 +105,8 @@ struct UploadView: View {
             "授权健康数据"
         case .uploading:
             "正在上传"
-        case .succeeded:
-            "已上传"
+        case .succeeded, .interrupted:
+            "上传全部数据"
         case .checking:
             "正在检查"
         case .unavailable:

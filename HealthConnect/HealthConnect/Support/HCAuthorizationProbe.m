@@ -61,3 +61,25 @@ void HCProbeEarliestReadDate(HKHealthStore *store,
         handler(nil, exception.reason ?: exception.name, nil, 0);
     }
 }
+
+BOOL HCObserverQuerySupported(HKSampleType *type) {
+    if (type == nil) {
+        return NO;
+    }
+    @try {
+        // Init validates the type and raises NSException for types that
+        // cannot be observed. The query is not executed.
+        HKObserverQuery *query = [[HKObserverQuery alloc] initWithSampleType:type
+                                                                    predicate:nil
+                                                                updateHandler:^(HKObserverQuery *unusedQuery,
+                                                                                HKObserverQueryCompletionHandler completion,
+                                                                                NSError *unusedError) {
+            if (completion != nil) {
+                completion();
+            }
+        }];
+        return query != nil;
+    } @catch (NSException *exception) {
+        return NO;
+    }
+}

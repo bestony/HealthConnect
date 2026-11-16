@@ -27,4 +27,7 @@ void HCProbeEarliestReadDate(HKHealthStore *store,
                              NSSet<HKObjectType *> *readTypes,
                              HCEarliestDateHandler handler);
 
+/// Returns NO when HealthKit rejects an observer query for this type.
+BOOL HCObserverQuerySupported(HKSampleType *type);
+
 NS_ASSUME_NONNULL_END

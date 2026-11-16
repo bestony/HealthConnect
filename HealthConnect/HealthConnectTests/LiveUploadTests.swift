@@ -42,7 +42,11 @@ struct LiveUploadTests {
         let session = URLSession(configuration: configuration)
         let transport = URLSessionExportTransport(session: session)
         let exporter = LivePageExporter(record: marker.record)
-        let summary = try await ExportUploader(transport: transport).upload(endpoint: endpoint, exporter: exporter)
+        let outcome = try await ExportUploader(transport: transport).upload(endpoint: endpoint, exporter: exporter, kind: .full)
+        guard case .uploaded(let summary) = outcome else {
+            Issue.record("Expected an upload")
+            return
+        }
         #expect(summary.sampleCount == 1)
         #expect(summary.batchCount == 1)
 
@@ -192,6 +196,8 @@ private final class LivePageExporter: HealthExporting {
     var totalUnitCount = 1
     var currentTypeIdentifier: String { record.typeIdentifier }
     var skippedTypeIdentifiers: [String] { [] }
+    var finishedAnchors: [String: Data] { [:] }
+    var supplementalHash: String? { nil }
 
     func nextPage() async throws -> ExportPage? {
         if served {

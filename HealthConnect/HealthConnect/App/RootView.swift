@@ -6,9 +6,24 @@ struct RootView: View {
     var body: some View {
         switch model.route {
         case .setup:
-            SetupView(model: model)
+            NavigationStack {
+                SetupView(model: model)
+            }
         case .upload:
-            UploadView(model: model)
+            TabView {
+                NavigationStack {
+                    UploadView(model: model)
+                }
+                .tabItem {
+                    Label("上传", systemImage: "square.and.arrow.up")
+                }
+                NavigationStack {
+                    HistoryView(model: model)
+                }
+                .tabItem {
+                    Label("历史", systemImage: "clock")
+                }
+            }
         }
     }
 }

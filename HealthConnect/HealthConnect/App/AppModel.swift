@@ -13,15 +13,17 @@ final class AppModel {
     private let settings: SettingsStoring
 
     let session: UploadSession
+    let sync: SyncCoordinator?
     var route: AppRoute
     var draftAddress: String
     var draftCode: String
     var setupMessage: String?
     var isSaving = false
 
-    init(settings: SettingsStoring, session: UploadSession) {
+    init(settings: SettingsStoring, session: UploadSession, sync: SyncCoordinator? = nil) {
         self.settings = settings
         self.session = session
+        self.sync = sync
         if let saved = settings.load() {
             draftAddress = saved.url.absoluteString
             draftCode = saved.verificationCode
@@ -72,12 +74,33 @@ final class AppModel {
     static func live() -> AppModel {
         let settings = SettingsStore(defaults: .standard, credentials: KeychainCredentialStore())
         let readableTypes = ReadableTypeFilter()
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appending(path: "HealthConnect", directoryHint: .isDirectory)
+        let anchors = AnchorStore(directory: support.appending(path: "anchors", directoryHint: .isDirectory))
         let session = UploadSession(
             settings: settings,
             access: HealthAccessCoordinator(client: HealthKitAuthorizationClient(readableTypes: readableTypes)),
-            makeExporter: { HealthKitExportSession(readableTypes: readableTypes) },
+            anchors: anchors,
+            history: UploadHistoryStore(fileURL: support.appending(path: "upload-history.json")),
+            background: ApplicationBackgroundTasks(),
+            makeExporter: { kind in
+                let identity = settings.load()?.endpoint.identity ?? ""
+                let checkpoint = anchors.load(identity: identity)
+                let scope: HealthExportScope = kind == .full
+                    ? .full
+                    : .incremental(anchors: checkpoint?.anchors ?? [:], supplementalHash: checkpoint?.supplementalHash)
+                return HealthKitExportSession(readableTypes: readableTypes, scope: scope)
+            },
             makeUploader: { ExportUploader(transport: URLSessionExportTransport()) }
         )
-        return AppModel(settings: settings, session: session)
+        return AppModel(
+            settings: settings,
+            session: session,
+            sync: SyncCoordinator(session: session, sampleTypes: HealthTypeCatalog.sampleTypes)
+        )
+    }
+
+    func startBackgroundDelivery() {
+        sync?.start()
     }
 }

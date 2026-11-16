@@ -9,13 +9,12 @@ import SwiftUI
 
 @main
 struct HealthConnectApp: App {
-    @State private var model = AppModel.live()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @State private var model = AppRuntime.model
 
     var body: some Scene {
         WindowGroup {
-            NavigationStack {
-                RootView(model: model)
-            }
+            RootView(model: model)
         }
     }
 }

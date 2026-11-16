@@ -10,8 +10,8 @@ final class URLSessionExportTransport: ExportTransport {
         self.encoder = ExportJSON.encoder()
     }
 
-    func createExport(endpoint: ServerEndpoint) async throws -> String {
-        let body = try encoder.encode(CreateExportBody(startedAt: Date()))
+    func createExport(endpoint: ServerEndpoint, mode: ExportMode) async throws -> String {
+        let body = try encoder.encode(CreateExportBody(startedAt: Date(), mode: mode.rawValue))
         let (status, data) = try await send(
             endpoint: endpoint,
             path: "v1/exports",
@@ -121,6 +121,7 @@ enum ExportJSON {
 
 private struct CreateExportBody: Encodable {
     var startedAt: Date
+    var mode: String
 }
 
 private struct CreateExportResponse: Decodable {

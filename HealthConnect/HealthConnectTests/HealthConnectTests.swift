@@ -201,12 +201,15 @@ struct UploadFlowTests {
             Issue.record("Expected success, got \(session.phase)")
             return
         }
-        #expect(session.canUpload == false)
-        #expect(transport.events == ["create", "batch", "complete"])
+        #expect(session.canUpload)
+        #expect(transport.events == ["create:replace", "batch", "complete"])
+        #expect(session.history.count == 1)
+        #expect(session.history[0].status == .succeeded)
+        #expect(session.history[0].kind == .full)
 
         let reloaded = makeSession(settings: settings, transport: RecordingTransport(), skipped: [])
         await reloaded.reload()
-        #expect(reloaded.canUpload == false)
+        #expect(reloaded.canUpload)
 
         let changed = try ServerEndpoint.parse(address: "https://example.com", verificationCode: "next").get()
         try settings.save(changed)
@@ -228,7 +231,7 @@ struct UploadFlowTests {
         #expect(rejectedSession.phase == .uploadFailed("验证码被服务器拒绝。"))
         #expect(rejectedSession.canUpload)
         #expect(settings.receipt() == nil)
-        #expect(rejected.events == ["create"])
+        #expect(rejected.events == ["create:replace"])
 
         let skipped = RecordingTransport()
         let skippedSession = makeSession(settings: settings, transport: skipped, skipped: ["HKQuantityTypeIdentifierStepCount"])
@@ -236,7 +239,7 @@ struct UploadFlowTests {
         await skippedSession.performUpload()
         #expect(skippedSession.canUpload)
         #expect(settings.receipt() == nil)
-        #expect(skipped.events == ["create", "batch"])
+        #expect(skipped.events == ["create:replace", "batch"])
     }
 
     @Test func anOversizedRecordDoesNotCompleteOrLock() async throws {
@@ -249,7 +252,9 @@ struct UploadFlowTests {
         let session = UploadSession(
             settings: settings,
             access: HealthAccessCoordinator(client: client),
-            makeExporter: {
+            anchors: MemoryAnchorStore(),
+            history: MemoryHistoryStore(),
+            makeExporter: { _ in
                 ScriptedExporter(skipped: [], records: [
                     ExportRecord(
                         kind: "sample",
@@ -269,7 +274,7 @@ struct UploadFlowTests {
         #expect(session.phase == .uploadFailed("有一条记录超过上传大小限制。上传未完成。"))
         #expect(session.canUpload)
         #expect(settings.receipt() == nil)
-        #expect(transport.events == ["create"])
+        #expect(transport.events == ["create:replace"])
     }
 
     private func makeSettings() -> SettingsStore {
@@ -289,7 +294,9 @@ struct UploadFlowTests {
         return UploadSession(
             settings: settings,
             access: HealthAccessCoordinator(client: client),
-            makeExporter: { ScriptedExporter(skipped: skipped) },
+            anchors: MemoryAnchorStore(),
+            history: MemoryHistoryStore(),
+            makeExporter: { _ in ScriptedExporter(skipped: skipped) },
             makeUploader: { ExportUploader(transport: transport) }
         )
     }
@@ -325,11 +332,14 @@ final class ScriptedExporter: HealthExporting {
     var totalUnitCount = 1
     var currentTypeIdentifier = "HKQuantityTypeIdentifierStepCount"
     var skippedTypeIdentifiers: [String]
+    var finishedAnchors: [String: Data]
+    var supplementalHash: String?
     private let records: [ExportRecord]
     private var served = false
 
-    init(skipped: [String], records: [ExportRecord]? = nil) {
+    init(skipped: [String], records: [ExportRecord]? = nil, finishedAnchors: [String: Data] = [:]) {
         skippedTypeIdentifiers = skipped
+        self.finishedAnchors = finishedAnchors
         self.records = records ?? [
             ExportRecord(kind: "sample", typeIdentifier: "HKQuantityTypeIdentifierStepCount", fields: ["value": .int(1)]),
         ]
@@ -349,8 +359,8 @@ final class RecordingTransport: ExportTransport {
     var events: [String] = []
     var error: UploadError?
 
-    func createExport(endpoint: ServerEndpoint) async throws -> String {
-        events.append("create")
+    func createExport(endpoint: ServerEndpoint, mode: ExportMode) async throws -> String {
+        events.append("create:\(mode.rawValue)")
         if let error {
             throw error
         }
