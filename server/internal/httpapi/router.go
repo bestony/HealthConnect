@@ -9,6 +9,8 @@ import (
 	"com.bestony.health-connect/internal/httpapi/handlers"
 	"com.bestony.health-connect/internal/httpapi/middleware"
 	"com.bestony.health-connect/internal/ingest"
+	"com.bestony.health-connect/internal/store/duckdb"
+	"com.bestony.health-connect/internal/store/sqlite"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +21,8 @@ type Deps struct {
 	Tokens    middleware.TokenLookup
 	NotFound  error
 	Imports   *ingest.Service
+	Facts     *duckdb.DB
+	Meta      *sqlite.DB
 	MaxUpload int64
 }
 
@@ -28,6 +32,7 @@ func New(deps Deps) http.Handler {
 	if log == nil {
 		log = slog.Default()
 	}
+	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.MaxMultipartMemory = 8 << 20
 	r.Use(accessLog(log), recovery(log))
@@ -40,6 +45,15 @@ func New(deps Deps) http.Handler {
 		v1.GET("/imports", api.List)
 		v1.GET("/imports/:id", api.Get)
 		v1.POST("/imports/:id/retry", api.Retry)
+		if deps.Facts != nil && deps.Meta != nil {
+			query := handlers.Query{Facts: deps.Facts, Meta: deps.Meta}
+			v1.GET("/catalog", query.Catalog)
+			v1.GET("/series", query.Series)
+			v1.GET("/records", query.Records)
+			v1.GET("/workouts", query.Workouts)
+			v1.GET("/activity-summaries", query.Activity)
+			v1.DELETE("/data", query.DeleteData)
+		}
 	}
 	return r
 }

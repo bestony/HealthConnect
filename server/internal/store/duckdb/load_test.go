@@ -12,6 +12,34 @@ import (
 	"com.bestony.health-connect/internal/ingest/applexml"
 )
 
+func TestWorkoutsQuery(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	userID, err := domain.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	importID, err := domain.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loadFixture(t, db, userID, importID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CommitImport(ctx, userID, importID, "replace"); err != nil {
+		t.Fatal(err)
+	}
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
+	rows, err := db.Workouts(ctx, userID, from, to, 10, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v", rows)
+	}
+}
+
 func TestReplaceThenMerge(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)

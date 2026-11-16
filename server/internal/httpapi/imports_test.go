@@ -127,7 +127,10 @@ func newAPI(t *testing.T, startWorker bool) (http.Handler, string, *duckdb.DB, *
 		worker.Start(ctx)
 	}
 	svc := ingest.NewService(meta, worker, inbox, log)
-	handler := New(Deps{Log: log, Tokens: meta, NotFound: sqlite.ErrNotFound, Imports: svc, MaxUpload: 1 << 20})
+	handler := New(Deps{
+		Log: log, Tokens: meta, NotFound: sqlite.ErrNotFound,
+		Imports: svc, Facts: facts, Meta: meta, MaxUpload: 1 << 20,
+	})
 	return handler, token, facts, meta
 }
 

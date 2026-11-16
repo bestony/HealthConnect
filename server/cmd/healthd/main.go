@@ -80,7 +80,7 @@ func run() error {
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.New(httpapi.Deps{
 			Log: log, Tokens: meta, NotFound: sqlite.ErrNotFound,
-			Imports: service, MaxUpload: cfg.MaxUploadBytes,
+			Imports: service, Facts: facts, Meta: meta, MaxUpload: cfg.MaxUploadBytes,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
