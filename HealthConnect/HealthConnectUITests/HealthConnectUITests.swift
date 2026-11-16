@@ -28,7 +28,7 @@ final class HealthConnectUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
+        XCTAssertTrue(app.textFields["服务器地址"].waitForExistence(timeout: 5))
         // XCUIAutomation Documentation
         // https://developer.apple.com/documentation/xcuiautomation
     }
