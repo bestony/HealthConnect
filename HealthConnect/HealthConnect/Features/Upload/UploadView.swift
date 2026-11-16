@@ -52,6 +52,7 @@ struct UploadView: View {
             }
         }
         .navigationTitle("上传数据")
+        .mcpHelp(address: model.draftAddress, verificationCode: model.draftCode)
         .task {
             await model.session.reload()
         }

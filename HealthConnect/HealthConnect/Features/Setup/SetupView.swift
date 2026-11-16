@@ -38,5 +38,6 @@ struct SetupView: View {
             }
         }
         .navigationTitle("连接设置")
+        .mcpHelp(address: model.draftAddress, verificationCode: model.draftCode)
     }
 }

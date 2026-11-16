@@ -21,6 +21,16 @@ The token is not a tool argument. The endpoint reads only the user for that toke
 }
 ```
 
+The iOS app copies this configuration. The app uses the server address that the user enters and appends `/mcp`. The verification code is the bearer token.
+
+Claude Code can add the same endpoint with this command:
+
+```text
+claude mcp add --transport http health-connect 'http://127.0.0.1:8080/mcp' --header 'Authorization: Bearer hc_…'
+```
+
+The app copies this command with the same address and the same token.
+
 Set `MCP_ENABLED=false` to disable `/mcp`. The default is `true`.
 
 The default listen address is `127.0.0.1:8080`. If you change `HTTP_ADDR`, the token is the access control.
