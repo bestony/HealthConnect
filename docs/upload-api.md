@@ -117,12 +117,38 @@ The manifest must contain:
 The app treats only HTTP 200 as a finished upload.
 The app then locks the upload button for that server address and verification code.
 
+## Abort an export
+
+```http
+POST /v1/exports/{exportId}/abort
+```
+
+This request has no body.
+
+The server marks an open export as abandoned.
+The server deletes the stored batch files for that export.
+The server does not load those batches.
+
+Success response is HTTP 204.
+HTTP 204 is also the response when the export is already abandoned.
+HTTP 409 `export_closed` means the export is completed.
+HTTP 404 means the export id is unknown.
+
 ## Failure behavior
 
-The app does not call `complete` when one or more HealthKit types fail to read.
+The app does not call `complete` when one or more HealthKit types fail to read, when the upload is cancelled, or when a batch request fails.
+The app calls `abort` for that export.
 The app does not lock the button after HTTP 401, a network error, or an incomplete export.
+
 A later tap creates a new export id.
-The server can keep the earlier partial export.
+`Create` abandons every other open export for that user and deletes their batch files.
+A user has at most one open export.
+
+When every batch is stored and only the complete request fails, the app keeps the export id.
+The next tap calls `complete` again.
+The app does not send those batches again.
+
+The server loads batches only when an export is completed.
 
 ## Record fields
 

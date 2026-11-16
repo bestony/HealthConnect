@@ -116,6 +116,8 @@ func (h Exports) Complete(c *gin.Context) {
 		switch {
 		case errors.Is(err, sqlite.ErrNotFound):
 			writeError(c, http.StatusNotFound, "not_found")
+		case errors.Is(err, sqlite.ErrExportClosed):
+			writeError(c, http.StatusConflict, "export_closed")
 		default:
 			writeError(c, http.StatusInternalServerError, "internal")
 		}
@@ -127,6 +129,33 @@ func (h Exports) Complete(c *gin.Context) {
 		"receivedBatchCount": exp.ReceivedBatchCount,
 		"completedAt":        exp.CompletedAt,
 	})
+}
+
+// Abort abandons one open export and deletes its batch files.
+func (h Exports) Abort(c *gin.Context) {
+	userID, ok := middleware.UserID(c)
+	if !ok {
+		writeError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	id := c.Param("id")
+	if !exportIDPattern.MatchString(id) {
+		writeError(c, http.StatusNotFound, "not_found")
+		return
+	}
+	err := h.Svc.Abort(c.Request.Context(), userID, id)
+	if err == nil {
+		c.Status(http.StatusNoContent)
+		return
+	}
+	switch {
+	case errors.Is(err, sqlite.ErrNotFound):
+		writeError(c, http.StatusNotFound, "not_found")
+	case errors.Is(err, sqlite.ErrExportClosed):
+		writeError(c, http.StatusConflict, "export_closed")
+	default:
+		writeError(c, http.StatusInternalServerError, "internal")
+	}
 }
 
 func parseExportTime(raw string) (time.Time, error) {

@@ -10,6 +10,7 @@ final class UploadSession {
     private let anchors: AnchorStoring
     private let historyStore: UploadHistoryStoring
     private let background: BackgroundTaskControlling
+    private let openExports: OpenExportStoring
     private let makeExporter: (UploadKind) -> HealthExporting
     private let makeUploader: () -> ExportUploader
     private var reloadTask: Task<Void, Never>?
@@ -26,6 +27,7 @@ final class UploadSession {
         anchors: AnchorStoring,
         history: UploadHistoryStoring,
         background: BackgroundTaskControlling? = nil,
+        openExports: OpenExportStoring,
         makeExporter: @escaping (UploadKind) -> HealthExporting,
         makeUploader: @escaping () -> ExportUploader
     ) {
@@ -34,6 +36,7 @@ final class UploadSession {
         self.anchors = anchors
         self.historyStore = history
         self.background = background ?? NoopBackgroundTasks()
+        self.openExports = openExports
         self.makeExporter = makeExporter
         self.makeUploader = makeUploader
         self.history = history.entries().reversed()
@@ -133,6 +136,18 @@ final class UploadSession {
             AppLog.upload.info("Incremental upload skipped because no anchor is committed")
             return
         }
+        let identity = saved.endpoint.identity
+        if kind == .full, let open = openExports.load(identity: identity) {
+            switch open.phase {
+            case .sending:
+                AppLog.upload.info("Aborting an unfinished export before a new upload")
+                await makeUploader().abortOpen(endpoint: saved.endpoint, exportID: open.exportID)
+            case .readyToComplete:
+                await retryStoredComplete(saved: saved, open: open)
+                background.end()
+                return
+            }
+        }
         let exporter = makeExporter(kind)
         var uploader = makeUploader()
         uploader.onProgress = { [weak self] progress in
@@ -147,7 +162,6 @@ final class UploadSession {
             byteCount: 0
         ))
         AppLog.upload.info("Upload started \(kind.rawValue, privacy: .public)")
-        let identity = saved.endpoint.identity
         let host = saved.url.host ?? ""
         do {
             let outcome = try await uploader.upload(endpoint: saved.endpoint, exporter: exporter, kind: kind)
@@ -193,6 +207,59 @@ final class UploadSession {
             record(kind: kind, status: .failed, summary: nil, exportID: nil, message: message, host: host)
         }
         background.end()
+    }
+
+    private func retryStoredComplete(saved: SavedSettings, open: OpenExport) async {
+        let identity = saved.endpoint.identity
+        let host = saved.url.host ?? ""
+        let uploader = makeUploader()
+        phase = .uploading(UploadProgress(
+            kind: .full,
+            currentTypeIdentifier: "",
+            completedUnitCount: 1,
+            totalUnitCount: 1,
+            sampleCount: open.sampleCount,
+            byteCount: 0
+        ))
+        AppLog.upload.info("Retrying complete for stored export \(open.exportID, privacy: .public)")
+        do {
+            let summary = try await uploader.completeStored(
+                endpoint: saved.endpoint,
+                exportID: open.exportID,
+                sampleCount: open.sampleCount,
+                batchCount: open.batchCount
+            )
+            let receipt = UploadReceipt(
+                identity: identity,
+                finishedAt: Date(),
+                sampleCount: summary.sampleCount,
+                byteCount: summary.byteCount,
+                batchCount: summary.batchCount
+            )
+            phase = .succeeded(receipt)
+            record(kind: .full, status: .succeeded, summary: summary, exportID: summary.exportID, message: nil, host: host)
+            if hasCommittedAnchors {
+                await performUpload(kind: .incremental)
+                if case .ready = phase {
+                    phase = .succeeded(receipt)
+                }
+            }
+        } catch is CancellationError {
+            AppLog.upload.info("Stored complete was canceled")
+            let message = "全量上传未完成。回到应用后可以重新上传。"
+            phase = .interrupted(message)
+            record(kind: .full, status: .interrupted, summary: nil, exportID: open.exportID, message: message, host: host)
+        } catch UploadError.rejectedCode {
+            AppLog.upload.error("Server rejected the verification code")
+            let message = "验证码被服务器拒绝。"
+            phase = .uploadFailed(message)
+            record(kind: .full, status: .failed, summary: nil, exportID: open.exportID, message: message, host: host)
+        } catch {
+            AppLog.upload.error("Stored complete failed")
+            let message = "上传失败。可以重试。"
+            phase = .uploadFailed(message)
+            record(kind: .full, status: .failed, summary: nil, exportID: open.exportID, message: message, host: host)
+        }
     }
 
     private func commitAnchors(kind: UploadKind, identity: String, exporter: HealthExporting) {

@@ -149,15 +149,17 @@ struct IncrementalUploadTests {
     ) -> UploadSession {
         let client = ScriptedAuthorizationClient()
         client.status = .unnecessary
+        let openExports = MemoryOpenExportStore()
         return UploadSession(
             settings: settings,
             access: HealthAccessCoordinator(client: client),
             anchors: anchorStore,
             history: MemoryHistoryStore(),
+            openExports: openExports,
             makeExporter: { _ in
                 ScriptedExporter(skipped: [], records: records, finishedAnchors: finished)
             },
-            makeUploader: { ExportUploader(transport: transport) }
+            makeUploader: { ExportUploader(transport: transport, openExports: openExports) }
         )
     }
 }

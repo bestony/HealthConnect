@@ -11,6 +11,7 @@ import (
 const (
 	ExportOpen      = "open"
 	ExportCompleted = "completed"
+	ExportAbandoned = "abandoned"
 )
 
 // ErrExportClosed means the export no longer accepts batches.
@@ -41,6 +42,53 @@ func (db *DB) CreateExport(ctx context.Context, id, userID, startedAt, mode stri
 	}
 	db.log.Info("export created", "export_id", id, "user_id", userID, "mode", mode)
 	return db.GetExport(ctx, userID, id)
+}
+
+// ListOpenExportIDs returns open exports for one user, oldest first.
+func (db *DB) ListOpenExportIDs(ctx context.Context, userID string) ([]string, error) {
+	rows, err := db.sql.QueryContext(ctx, `
+		SELECT id FROM exports WHERE user_id = ? AND status = ? ORDER BY created_at`, userID, ExportOpen)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite list open exports: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("sqlite scan open export: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlite list open exports: %w", err)
+	}
+	return ids, nil
+}
+
+// AbandonExport marks an open export abandoned.
+// An export that is already abandoned is unchanged.
+// A completed export returns ErrExportClosed.
+func (db *DB) AbandonExport(ctx context.Context, userID, id string) error {
+	res, err := db.sql.ExecContext(ctx, `
+		UPDATE exports SET status = ? WHERE user_id = ? AND id = ? AND status = ?`,
+		ExportAbandoned, userID, id, ExportOpen)
+	if err != nil {
+		return fmt.Errorf("sqlite abandon export: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 1 {
+		db.log.Info("export abandoned", "export_id", id, "user_id", userID)
+		return nil
+	}
+	exp, err := db.GetExport(ctx, userID, id)
+	if err != nil {
+		return err
+	}
+	if exp.Status == ExportAbandoned {
+		return nil
+	}
+	return ErrExportClosed
 }
 
 // GetExport returns an export owned by the user.

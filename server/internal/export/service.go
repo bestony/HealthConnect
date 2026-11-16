@@ -43,9 +43,21 @@ func NewService(meta *sqlite.DB, facts *duckdb.DB, dataDir string, log *slog.Log
 func (s *Service) SetMaxBatchBytes(n int64) { s.maxBatch = n }
 
 // Create starts an export. exportID is 32 lowercase hex characters.
+// Any other open export for the user is abandoned first. One user has one open export.
 func (s *Service) Create(ctx context.Context, userID, startedAt, mode string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if mode == "" {
 		mode = sqlite.ModeReplace
+	}
+	open, err := s.meta.ListOpenExportIDs(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	for _, id := range open {
+		if err := s.abandonLocked(ctx, userID, id); err != nil {
+			return "", err
+		}
 	}
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
@@ -56,6 +68,30 @@ func (s *Service) Create(ctx context.Context, userID, startedAt, mode string) (s
 		return "", err
 	}
 	return id, nil
+}
+
+// Abort marks one export abandoned and deletes its batch files.
+// An unknown id returns sqlite.ErrNotFound.
+// A completed export returns sqlite.ErrExportClosed.
+// An export that is already abandoned returns nil.
+func (s *Service) Abort(ctx context.Context, userID, exportID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.abandonLocked(ctx, userID, exportID)
+}
+
+// abandonLocked requires s.mu. It does not load batches.
+func (s *Service) abandonLocked(ctx context.Context, userID, exportID string) error {
+	if err := s.meta.AbandonExport(ctx, userID, exportID); err != nil {
+		return err
+	}
+	dir := filepath.Join(s.dir, exportID)
+	if err := os.RemoveAll(dir); err != nil {
+		s.log.Error("export batch delete failed", "export_id", exportID, "user_id", userID)
+		return err
+	}
+	s.log.Info("export batches removed", "export_id", exportID, "user_id", userID)
+	return nil
 }
 
 // AddBatch stores one raw NDJSON body.
@@ -92,6 +128,9 @@ func (s *Service) Complete(ctx context.Context, userID, exportID string, sampleC
 	}
 	if exp.Status == sqlite.ExportCompleted {
 		return exp, nil
+	}
+	if exp.Status != sqlite.ExportOpen {
+		return sqlite.Export{}, sqlite.ErrExportClosed
 	}
 	if exp.ReceivedBatchCount > 0 {
 		paths := make([]string, 0, exp.ReceivedBatchCount)

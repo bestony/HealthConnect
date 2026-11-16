@@ -249,6 +249,82 @@ func TestExportMergeKeepsExistingRows(t *testing.T) {
 	}
 }
 
+func TestAbortAndCreateAbandonOpenExports(t *testing.T) {
+	stack := newStack(t, false)
+	h, token := stack.handler, stack.token
+
+	unknown := postJSON(t, h, token, "/v1/exports/0123456789abcdef0123456789abcdef/abort", "")
+	if unknown.Code != http.StatusNotFound || !strings.Contains(unknown.Body.String(), `"error":"not_found"`) {
+		t.Fatalf("unknown abort = %d %s", unknown.Code, unknown.Body.String())
+	}
+
+	first := createOpenExport(t, h, token)
+	batch := postRaw(t, h, token, "/v1/exports/"+first+"/batches", "application/x-ndjson", "{}\n")
+	if batch.Code != http.StatusNoContent {
+		t.Fatalf("first batch = %d %s", batch.Code, batch.Body.String())
+	}
+	firstDir := filepath.Join(stack.dir, "exports", first)
+	if _, err := os.Stat(firstDir); err != nil {
+		t.Fatal(err)
+	}
+
+	second := createOpenExport(t, h, token)
+	if _, err := os.Stat(firstDir); !os.IsNotExist(err) {
+		t.Fatalf("abandoned directory = %v", err)
+	}
+	closed := postRaw(t, h, token, "/v1/exports/"+first+"/batches", "application/x-ndjson", "{}\n")
+	if closed.Code != http.StatusConflict || !strings.Contains(closed.Body.String(), `"error":"export_closed"`) {
+		t.Fatalf("abandoned batch = %d %s", closed.Code, closed.Body.String())
+	}
+
+	secondBatch := postRaw(t, h, token, "/v1/exports/"+second+"/batches", "application/x-ndjson", exportFixture())
+	if secondBatch.Code != http.StatusNoContent {
+		t.Fatalf("second batch = %d %s", secondBatch.Code, secondBatch.Body.String())
+	}
+	abort := postJSON(t, h, token, "/v1/exports/"+second+"/abort", "")
+	if abort.Code != http.StatusNoContent || abort.Body.Len() != 0 {
+		t.Fatalf("abort = %d %s", abort.Code, abort.Body.String())
+	}
+	again := postJSON(t, h, token, "/v1/exports/"+second+"/abort", "")
+	if again.Code != http.StatusNoContent {
+		t.Fatalf("second abort = %d %s", again.Code, again.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(stack.dir, "exports", second)); !os.IsNotExist(err) {
+		t.Fatalf("aborted directory = %v", err)
+	}
+	afterAbort := postRaw(t, h, token, "/v1/exports/"+second+"/batches", "application/x-ndjson", "{}\n")
+	if afterAbort.Code != http.StatusConflict {
+		t.Fatalf("batch after abort = %d %s", afterAbort.Code, afterAbort.Body.String())
+	}
+	completeAborted := postJSON(t, h, token, "/v1/exports/"+second+"/complete", `{"sampleCount":1,"batchCount":1}`)
+	if completeAborted.Code != http.StatusConflict || !strings.Contains(completeAborted.Body.String(), `"error":"export_closed"`) {
+		t.Fatalf("complete aborted = %d %s", completeAborted.Code, completeAborted.Body.String())
+	}
+
+	kept := completeExport(t, h, token, "replace", exportFixture())
+	abortKept := postJSON(t, h, token, "/v1/exports/"+kept+"/abort", "")
+	if abortKept.Code != http.StatusConflict || !strings.Contains(abortKept.Body.String(), `"error":"export_closed"`) {
+		t.Fatalf("abort completed = %d %s", abortKept.Code, abortKept.Body.String())
+	}
+	series := authed(t, h, token, http.MethodGet, "/v1/series?type=HKQuantityTypeIdentifierStepCount&from=2024-01-01T00:00:00Z&to=2024-01-03T00:00:00Z&grain=day&agg=sum")
+	if series.Code != http.StatusOK || !strings.Contains(series.Body.String(), `"value":1200`) {
+		t.Fatalf("series after abort of completed export = %d %s", series.Code, series.Body.String())
+	}
+}
+
+func createOpenExport(t *testing.T, h http.Handler, token string) string {
+	t.Helper()
+	created := postJSON(t, h, token, "/v1/exports", `{"startedAt":"2026-01-06T00:00:00.000Z","mode":"replace"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", created.Code, created.Body.String())
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(created.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	return payload["exportId"]
+}
+
 func completeExport(t *testing.T, h http.Handler, token, mode, body string) string {
 	t.Helper()
 	created := postJSON(t, h, token, "/v1/exports", `{"startedAt":"2026-01-05T00:00:00.000Z","mode":"`+mode+`"}`)

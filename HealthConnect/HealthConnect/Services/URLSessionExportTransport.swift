@@ -62,6 +62,20 @@ final class URLSessionExportTransport: ExportTransport {
         }
     }
 
+    func abortExport(endpoint: ServerEndpoint, exportID: String) async throws {
+        let (status, _) = try await send(
+            endpoint: endpoint,
+            path: "v1/exports/\(exportID)/abort",
+            method: "POST",
+            body: nil,
+            contentType: nil
+        )
+        if status == 204 || status == 404 {
+            return
+        }
+        throw statusError(status)
+    }
+
     private func send(
         endpoint: ServerEndpoint,
         path: String,

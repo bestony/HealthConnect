@@ -239,7 +239,72 @@ struct UploadFlowTests {
         await skippedSession.performUpload()
         #expect(skippedSession.canUpload)
         #expect(settings.receipt() == nil)
-        #expect(skipped.events == ["create:replace", "batch"])
+        #expect(skipped.events == ["create:replace", "batch", "abort"])
+    }
+
+    @Test func cancellationAbortsTheOpenExport() async throws {
+        let settings = makeSettings()
+        let endpoint = try ServerEndpoint.parse(address: "https://example.com", verificationCode: "code").get()
+        try settings.save(endpoint)
+        let transport = RecordingTransport()
+        transport.cancelBatch = true
+        let session = makeSession(settings: settings, transport: transport, skipped: [])
+        await session.reload()
+        await session.performUpload()
+        #expect(session.phase == .interrupted("全量上传未完成。回到应用后可以重新上传。"))
+        #expect(session.canUpload)
+        #expect(transport.events == ["create:replace", "batch", "abort"])
+        #expect(transport.abortedIDs == ["abc"])
+    }
+
+    @Test func aStoredSendingExportIsAbortedBeforeCreate() async throws {
+        let settings = makeSettings()
+        let endpoint = try ServerEndpoint.parse(address: "https://example.com", verificationCode: "code").get()
+        try settings.save(endpoint)
+        let store = MemoryOpenExportStore()
+        try store.save(
+            OpenExport(exportID: "old-export", phase: .sending, sampleCount: 1, batchCount: 1),
+            identity: endpoint.identity
+        )
+        let transport = RecordingTransport()
+        let session = makeSession(settings: settings, transport: transport, skipped: [], openExports: store)
+        await session.reload()
+        await session.performUpload()
+        guard case .succeeded = session.phase else {
+            Issue.record("Expected success, got \(session.phase)")
+            return
+        }
+        #expect(transport.events == ["abort", "create:replace", "batch", "complete"])
+        #expect(transport.abortedIDs == ["old-export"])
+        #expect(store.load(identity: endpoint.identity) == nil)
+    }
+
+    @Test func aStoredCompleteIsRetriedWithoutANewExport() async throws {
+        let settings = makeSettings()
+        let endpoint = try ServerEndpoint.parse(address: "https://example.com", verificationCode: "code").get()
+        try settings.save(endpoint)
+        let store = MemoryOpenExportStore()
+        let transport = RecordingTransport()
+        transport.completeError = UploadError.server(status: 500)
+        let session = makeSession(settings: settings, transport: transport, skipped: [], openExports: store)
+        await session.reload()
+        await session.performUpload()
+        #expect(session.phase == .uploadFailed("上传失败。可以重试。"))
+        #expect(transport.events == ["create:replace", "batch", "complete"])
+        #expect(store.load(identity: endpoint.identity)?.phase == .readyToComplete)
+        #expect(store.load(identity: endpoint.identity)?.sampleCount == 1)
+        #expect(store.load(identity: endpoint.identity)?.batchCount == 1)
+
+        transport.completeError = nil
+        await session.performUpload()
+        guard case .succeeded = session.phase else {
+            Issue.record("Expected success, got \(session.phase)")
+            return
+        }
+        #expect(transport.events == ["create:replace", "batch", "complete", "complete"])
+        #expect(transport.completedSampleCount == 1)
+        #expect(transport.completedBatchCount == 1)
+        #expect(store.load(identity: endpoint.identity) == nil)
     }
 
     @Test func anOversizedRecordDoesNotCompleteOrLock() async throws {
@@ -249,11 +314,13 @@ struct UploadFlowTests {
         let transport = RecordingTransport()
         let client = ScriptedAuthorizationClient()
         client.status = .unnecessary
+        let openExports = MemoryOpenExportStore()
         let session = UploadSession(
             settings: settings,
             access: HealthAccessCoordinator(client: client),
             anchors: MemoryAnchorStore(),
             history: MemoryHistoryStore(),
+            openExports: openExports,
             makeExporter: { _ in
                 ScriptedExporter(skipped: [], records: [
                     ExportRecord(
@@ -264,7 +331,7 @@ struct UploadFlowTests {
                 ])
             },
             makeUploader: {
-                var uploader = ExportUploader(transport: transport)
+                var uploader = ExportUploader(transport: transport, openExports: openExports)
                 uploader.maxBatchBytes = 80
                 return uploader
             }
@@ -274,7 +341,7 @@ struct UploadFlowTests {
         #expect(session.phase == .uploadFailed("有一条记录超过上传大小限制。上传未完成。"))
         #expect(session.canUpload)
         #expect(settings.receipt() == nil)
-        #expect(transport.events == ["create:replace"])
+        #expect(transport.events == ["create:replace", "abort"])
     }
 
     private func makeSettings() -> SettingsStore {
@@ -287,17 +354,20 @@ struct UploadFlowTests {
     private func makeSession(
         settings: SettingsStore,
         transport: RecordingTransport,
-        skipped: [String]
+        skipped: [String],
+        openExports: OpenExportStoring? = nil
     ) -> UploadSession {
         let client = ScriptedAuthorizationClient()
         client.status = .unnecessary
+        let store = openExports ?? MemoryOpenExportStore()
         return UploadSession(
             settings: settings,
             access: HealthAccessCoordinator(client: client),
             anchors: MemoryAnchorStore(),
             history: MemoryHistoryStore(),
+            openExports: store,
             makeExporter: { _ in ScriptedExporter(skipped: skipped) },
-            makeUploader: { ExportUploader(transport: transport) }
+            makeUploader: { ExportUploader(transport: transport, openExports: store) }
         )
     }
 }
@@ -357,7 +427,12 @@ final class ScriptedExporter: HealthExporting {
 @MainActor
 final class RecordingTransport: ExportTransport {
     var events: [String] = []
+    var abortedIDs: [String] = []
     var error: UploadError?
+    var completeError: UploadError?
+    var cancelBatch = false
+    var completedSampleCount = 0
+    var completedBatchCount = 0
 
     func createExport(endpoint: ServerEndpoint, mode: ExportMode) async throws -> String {
         events.append("create:\(mode.rawValue)")
@@ -369,6 +444,9 @@ final class RecordingTransport: ExportTransport {
 
     func uploadBatch(endpoint: ServerEndpoint, exportID: String, body: Data) async throws {
         events.append("batch")
+        if cancelBatch {
+            throw CancellationError()
+        }
     }
 
     func completeExport(
@@ -378,5 +456,15 @@ final class RecordingTransport: ExportTransport {
         batchCount: Int
     ) async throws {
         events.append("complete")
+        completedSampleCount = sampleCount
+        completedBatchCount = batchCount
+        if let completeError {
+            throw completeError
+        }
+    }
+
+    func abortExport(endpoint: ServerEndpoint, exportID: String) async throws {
+        events.append("abort")
+        abortedIDs.append(exportID)
     }
 }

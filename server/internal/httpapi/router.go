@@ -61,6 +61,7 @@ func New(deps Deps) http.Handler {
 			v1.POST("/exports", exp.Create)
 			v1.POST("/exports/:id/batches", exp.Batch)
 			v1.POST("/exports/:id/complete", exp.Complete)
+			v1.POST("/exports/:id/abort", exp.Abort)
 		}
 		if deps.Facts != nil && deps.Meta != nil {
 			query := handlers.Query{Facts: deps.Facts, Meta: deps.Meta}

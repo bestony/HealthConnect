@@ -79,12 +79,14 @@ final class AppModel {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appending(path: "HealthConnect", directoryHint: .isDirectory)
         let anchors = AnchorStore(directory: support.appending(path: "anchors", directoryHint: .isDirectory))
+        let openExports = OpenExportStore(fileURL: support.appending(path: "open-export.json"))
         let session = UploadSession(
             settings: settings,
             access: HealthAccessCoordinator(client: HealthKitAuthorizationClient(readableTypes: readableTypes)),
             anchors: anchors,
             history: UploadHistoryStore(fileURL: support.appending(path: "upload-history.json")),
             background: ApplicationBackgroundTasks(),
+            openExports: openExports,
             makeExporter: { kind in
                 let identity = settings.load()?.endpoint.identity ?? ""
                 let checkpoint = anchors.load(identity: identity)
@@ -93,7 +95,7 @@ final class AppModel {
                     : .incremental(anchors: checkpoint?.anchors ?? [:], supplementalHash: checkpoint?.supplementalHash)
                 return HealthKitExportSession(readableTypes: readableTypes, scope: scope)
             },
-            makeUploader: { ExportUploader(transport: URLSessionExportTransport()) }
+            makeUploader: { ExportUploader(transport: URLSessionExportTransport(), openExports: openExports) }
         )
         let observeTips = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
         return AppModel(
