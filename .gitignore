@@ -3,3 +3,6 @@ server/data/
 server/.env
 .DS_Store
 HealthConnect/HealthConnectTests/LiveSecret.txt
+
+# Xcode per-user state: window layout and scheme order.
+xcuserdata/
